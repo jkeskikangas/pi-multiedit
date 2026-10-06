@@ -21,23 +21,20 @@ export type EditSpec = {
   to?: string;
   until?: string;
   json?: string;
-  new?: string;
+  /** Text for the text selectors; a JSON value (any type) for `json`. */
+  new?: unknown;
   action?: Action;
   count?: number | "all";
-  /** Aliases from pi's built-in edit tool. */
-  oldText?: string;
-  newText?: string;
 };
 
-/** As sent by the model: with `json`, `new` may be any JSON value (a non-JSON string is a string). */
-export type EditInput = Omit<EditSpec, "new" | "newText"> & { new?: unknown; newText?: unknown; edits?: unknown[] };
+/** An edit whose `new` is text: every selector except `json`. */
+type TextEdit = Omit<EditSpec, "new"> & { new?: string };
 
 export type FileSpec = { path: string; write?: string; moveTo?: string; delete?: boolean };
 
 export type EditRequest = {
   path?: string;
-  glob?: string;
-  edits?: EditInput[];
+  edits?: EditSpec[];
   files?: FileSpec[];
   patch?: string;
 };
@@ -145,7 +142,7 @@ export class Planner {
   async run(req: EditRequest): Promise<Plan> {
     if (req.patch) await this.step(() => this.patch(req.patch!));
     for (const f of req.files ?? []) await this.step(() => this.fileOp(f));
-    for (const e of flatten(req.edits ?? [])) await this.step(() => this.edit(e, req));
+    for (const e of req.edits ?? []) await this.step(() => this.edit(e, req.path));
     if (this.editNo === 0) this.failures.push({ edit: 0, message: "nothing to do: pass edits, files or patch" });
     return { files: this.files, notes: this.notes, failures: this.failures, editCount: this.editNo };
   }
@@ -199,8 +196,7 @@ export class Planner {
 
   // ── edits ────────────────────────────────────────────────────────────────────
 
-  private async targets(spec: EditSpec, defaults: { path?: string; glob?: string }): Promise<string[]> {
-    const e = spec.path === undefined && spec.glob === undefined ? { ...spec, path: defaults.path, glob: defaults.glob } : spec;
+  private async targets(e: TextEdit, defaultPath?: string): Promise<string[]> {
     if (e.glob !== undefined && e.path !== undefined) throw new EditError("give path or glob, not both");
     if (e.glob !== undefined) {
       this.listing ??= await this.fs.list(this.cwd);
@@ -216,24 +212,18 @@ export class Planner {
       if (live.length === 0) throw new EditError(`glob ${e.glob} matched no files`);
       return live.sort();
     }
-    const path = e.path;
-    if (!path) throw new EditError("edit needs path or glob (its own or the call's)");
+    const path = e.path ?? defaultPath;
+    if (!path) throw new EditError("edit needs path or glob (or a top-level path)");
     return [(await this.state(this.abs(path))).abs];
   }
 
-  private async edit(raw: EditInput, defaults: { path?: string; glob?: string }): Promise<void> {
-    const given = raw.new ?? raw.newText;
-    if (given !== undefined && typeof given !== "string") {
-      if (raw.json === undefined) throw new EditError("new must be a string (any JSON value is accepted only with json)");
+  private async edit(raw: EditSpec, defaultPath?: string): Promise<void> {
+    if (raw.json === undefined && raw.new !== undefined && typeof raw.new !== "string") {
+      throw new EditError("new must be a string; only json takes a JSON value");
     }
-    const { newText: _alias, ...rest } = raw;
-    const e: EditSpec = {
-      ...rest,
-      old: raw.old ?? raw.oldText,
-      new: given === undefined || typeof given === "string" ? given : JSON.stringify(given),
-    };
-    const action: Action = e.action ?? (e.new === undefined && e.json === undefined ? "delete" : "replace");
-    if (action !== "delete" && e.new === undefined) throw new EditError(`action ${action} needs new`);
+    const e: TextEdit = { ...raw, new: raw.json === undefined ? (raw.new as string | undefined) : undefined };
+    const action: Action = raw.action ?? (raw.new === undefined ? "delete" : "replace");
+    if (action !== "delete" && raw.new === undefined) throw new EditError(`action ${action} needs new`);
     if (e.new !== undefined) {
       e.new = norm(e.new);
       if (e.new.split("\n").some((l) => ANCHOR_PREFIX_RE.test(l))) {
@@ -248,14 +238,14 @@ export class Planner {
     if ((e.to !== undefined || e.until !== undefined) && e.from === undefined) throw new EditError("to/until need from");
     if (e.to !== undefined && e.until !== undefined) throw new EditError("give to (inclusive) or until (exclusive), not both");
 
-    const paths = await this.targets(e, defaults);
+    const paths = await this.targets(e, defaultPath);
     const kind = selectors[0];
 
     if (kind === "json") {
       for (const abs of paths) {
         const st = await this.live(abs);
         try {
-          this.replaceWhole(st, jsonEdit(st.cur!, e.json!, action, e.new));
+          this.replaceWhole(st, jsonEdit(st.cur!, e.json!, action, raw.new));
         } catch (err) {
           throw new EditError(`${this.rel(abs)}: ${(err as Error).message}`, undefined, this.rel(abs));
         }
@@ -303,7 +293,7 @@ export class Planner {
     return st;
   }
 
-  private select(kind: string, e: EditSpec, st: FileState, action: Action): { spans: Span[]; fuzz: Fuzz } {
+  private select(kind: string, e: TextEdit, st: FileState, action: Action): { spans: Span[]; fuzz: Fuzz } {
     const text = st.cur!;
     const wrap = (spans: Span[], fuzz: Fuzz = "exact") => ({ spans: spans.map((s) => this.act(s, text, action, e.new ?? "")), fuzz });
     switch (kind) {
@@ -355,7 +345,7 @@ export class Planner {
     return { ...span, replacement: action === "before" ? add + matched : matched + add };
   }
 
-  private range(e: EditSpec, st: FileState, action: Action): { spans: Span[]; fuzz: Fuzz } {
+  private range(e: TextEdit, st: FileState, action: Action): { spans: Span[]; fuzz: Fuzz } {
     const text = st.cur!;
     const from = this.locate(e.from!, st, 0, "from");
     const endRef = e.to ?? e.until;
@@ -411,23 +401,14 @@ export class Planner {
     if (st.rewrittenBy !== undefined) throw new EditError(`${role} ${a.line}#${a.hash}: ${rel} was rewritten by step ${st.rewrittenBy}; anchor by text`, undefined, rel);
     const lines = splitLines(base);
     if (a.content !== undefined && lines[a.line - 1]?.trimEnd() !== a.content.trimEnd()) {
-      // Copied content is a stronger check than the hash: a slipped line number is corrected
-      // only when exactly one nearby line has that content.
-      const near: number[] = [];
-      for (let n = Math.max(1, a.line - 5); n <= Math.min(lines.length, a.line + 5); n++) {
-        if (lines[n - 1].trimEnd() === a.content.trimEnd()) near.push(n);
-      }
-      if (near.length !== 1) {
-        const from = Math.max(1, a.line - 2);
-        const to = Math.min(lines.length, a.line + 2);
-        throw new EditError(
-          `${role} ${a.line}#${a.hash}: content does not match line ${a.line}${near.length > 1 ? ` (it matches lines ${near.join(", ")})` : ""}`,
-          to >= from ? [formatAnchored(lines.slice(from - 1, to), from)] : undefined,
-          rel,
-        );
-      }
-      this.notes.push({ edit: this.editNo, text: `${rel}: ${role} anchor line ${a.line} → ${near[0]} (matched by its content)` });
-      a = { ...a, line: near[0], hash: lineHash(near[0], lines[near[0] - 1]) };
+      // The copied content is checked exactly; a mismatch means the anchor is wrong or stale.
+      const from = Math.max(1, a.line - 2);
+      const to = Math.min(lines.length, a.line + 2);
+      throw new EditError(
+        `${role} ${a.line}#${a.hash}: content does not match line ${a.line}`,
+        to >= from ? [formatAnchored(lines.slice(from - 1, to), from)] : undefined,
+        rel,
+      );
     }
     const actual = a.line <= lines.length ? lineHash(a.line, lines[a.line - 1]) : undefined;
     if (actual !== a.hash) {
@@ -449,7 +430,7 @@ export class Planner {
   }
 
   /** A retried edit: old is gone but new is present. Still a failure (the call must stay exact), with a hint. */
-  private failIfAlreadyApplied(kind: string, e: EditSpec, action: Action, paths: string[]): void {
+  private failIfAlreadyApplied(kind: string, e: TextEdit, action: Action, paths: string[]): void {
     if (kind !== "old" || e.glob || !e.new) return;
     const st = this.files.get(paths[0])!;
     const probe = action === "before" ? e.new + e.old : action === "after" ? e.old + e.new : e.new;
@@ -598,17 +579,6 @@ function hunkSpans(text: string, hunks: Hunk[], path: string, notes: Note[], ste
     cursor = endLine;
   }
   return spans;
-}
-
-/** Expands `{path|glob, edits: [...]}` groups into their edits, which inherit the group's scope. */
-function flatten(items: EditInput[]): EditInput[] {
-  return items.flatMap((item) => {
-    if (!Array.isArray(item.edits)) return [item];
-    const { edits, ...group } = item;
-    const scope = { ...(group.path !== undefined && { path: group.path }), ...(group.glob !== undefined && { glob: group.glob }) };
-    const children = edits as EditInput[];
-    return flatten(children.map((child) => (child.path === undefined && child.glob === undefined ? { ...scope, ...child } : child)));
-  });
 }
 
 /** `$&`, `$1`…`$99`, `$<name>` and `$$`, as in String.prototype.replace. */

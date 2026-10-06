@@ -29,11 +29,13 @@ const editItem = Type.Object(
     flags: Type.Optional(Type.String({ description: "Regex flags (i, m, s, u); g is implied" })),
     ast: Type.Optional(Type.String({ description: "Selector: ast-grep pattern, e.g. Repo.get($S, $ID); new may use $S, $$$ARGS" })),
     lang: Type.Optional(Type.String({ description: "ast-grep language when the extension does not tell" })),
-    from: Type.Optional(Type.String({ description: "Selector: range start, a LINE#HASH anchor or exact unique text" })),
-    to: Type.Optional(Type.String({ description: "Range end, inclusive (anchor or text after from)" })),
+    from: Type.Optional(Type.String({ description: "Selector: range start: an anchor N#HH or N#HH:content copied from read (content is checked exactly), or exact unique text" })),
+    to: Type.Optional(Type.String({ description: "Range end, inclusive: anchor or text after from" })),
     until: Type.Optional(Type.String({ description: "Range end, exclusive: the range stops where this text begins" })),
     json: Type.Optional(Type.String({ description: "Selector: JSON pointer in a JSON/JSONC file; segments may be [key=value] or - (append)" })),
-    new: Type.Optional(Type.Unknown({ description: "Replacement or inserted text; with json, any JSON value" })),
+    new: Type.Optional(
+      Type.Unknown({ description: "A string for old/from/regex/ast. For json, the JSON value itself (object, array, string, number, boolean or null), not JSON-encoded text" }),
+    ),
     action: Type.Optional(
       Type.Union([Type.Literal("replace"), Type.Literal("before"), Type.Literal("after"), Type.Literal("delete")], {
         description: "replace (default), insert before/after the selection, or delete it",
@@ -44,9 +46,6 @@ const editItem = Type.Object(
         description: "Expected number of matches across all target files; default 1",
       }),
     ),
-    edits: Type.Optional(Type.Array(Type.Unknown(), { description: "Group: edits that inherit this item's path/glob" })),
-    oldText: Type.Optional(Type.String({ description: "Alias of old" })),
-    newText: Type.Optional(Type.String({ description: "Alias of new" })),
   },
   { additionalProperties: false },
 );
@@ -64,7 +63,6 @@ const fileItem = Type.Object(
 export const editSchema = Type.Object(
   {
     path: Type.Optional(Type.String({ description: "Default file for edits that name none" })),
-    glob: Type.Optional(Type.String({ description: "Default glob for edits that name no path or glob" })),
     edits: Type.Optional(Type.Array(editItem, { description: "Applied in order; each sees the result of the previous ones" })),
     files: Type.Optional(Type.Array(fileItem, { description: "Create, overwrite, move or delete files; runs before edits" })),
     patch: Type.Optional(Type.String({ description: "A Codex apply_patch envelope (*** Begin Patch … *** End Patch); runs first" })),
@@ -81,25 +79,30 @@ export type EditDetails = {
   written: boolean;
 };
 
-const DESCRIPTION = `Edit files: any number of edits across any number of files, applied all-or-nothing in one call.
-Every edit is checked in memory first; if any edit fails, nothing is written and every failure is reported at once with nearby LINE#HASH anchors for the retry.
+const DESCRIPTION = `Edit files: any number of edits across any number of files in one call, applied all-or-nothing.
+Every edit is checked in memory first; if any fails, nothing is written and every failure is reported at once with nearby N#HH anchors for the retry.
 
-Each edit = one selector + an action:
-- old: exact text. A miss retries ignoring trailing whitespace/typographic punctuation, then a uniform indentation shift (new is re-indented to match); the result says so.
-- from [+ to | until]: a range. Each end is a LINE#HASH anchor from read (whole lines) or exact text. to is inclusive, until exclusive.
+Each item of edits has: one scope (path, or glob over git-visible files; a top-level path is the default), exactly one selector, an optional action and an optional count.
+Selectors:
+- old: exact text. A miss retries ignoring trailing whitespace/typographic punctuation, then a uniform indentation shift (new is re-indented); the result says so.
+- from + to (inclusive) or until (exclusive): a range. Each end is an anchor from read (N#HH, or N#HH:content with the content checked exactly), which covers whole lines, or exact text.
 - regex (+ flags): JavaScript regex; new may use $1, $<name>, $&.
-- ast (+ lang): ast-grep pattern; $X matches one node, $$$X many; reuse them in new. Multi-line new is indented relative to the match.
-- json: JSON pointer for JSON/JSONC files, e.g. /suites/[path=test/a.exs]/layer; "-" appends to an array. new is a JSON value. Only that node changes.
-action: replace (default), before, after, delete (also implied when new is omitted). Line-anchored ranges take whole lines: the trailing newline of new is optional, and new: "" removes the lines.
-count: matches expected across all targets (default 1, or a number, or "all"); a mismatch fails with the match locations.
-glob instead of path applies the edit to every git-visible matching file.
-
-files: write/moveTo/delete whole files, before the edits run (edits then use the new paths). patch: a Codex apply_patch envelope, applied first.
-Edits run in order on the evolving content; LINE#HASH anchors always refer to the file as you last read it and are mapped through earlier edits in the same call.
-An edit whose old text is gone but whose new text is present fails like any miss, naming where new already is (drop it if it was applied before).
-The result lists only changed lines: +N#HH:text for added lines and ~N#HH:… with [-removed-]{+added+} for rewritten lines; those anchors are valid for the next call.
+- ast (+ lang): ast-grep pattern; $X matches one node, $$$X many; reuse them in new. Continuation lines of new are indented relative to the match.
+- json: JSON pointer into a JSON/JSONC file; segments are keys, indexes, - (append) or [key=value]. new is the JSON value itself, e.g. "integration", 3 or {"path": "a"}.
+action: replace (default), before, after, delete (the default when new is omitted). Line ranges take whole lines: new's trailing newline is optional, and new: "" removes them.
+count: matches expected across the scope: 1 (default), a number, or "all". A mismatch fails and lists the matches.
+files: write / moveTo / delete whole files; runs before edits. patch: a Codex apply_patch envelope; runs first.
+Edits run in order on the evolving content. Anchors always refer to the file as you last read it and are mapped through earlier edits in the same call.
 An edit that introduces a parse error in a file with a known grammar is refused like any failure (errors already in the file do not count); allowSyntaxErrors overrides this when the parser is wrong.
-The result is the verified on-disk state: files are re-read after writing. Do not re-read, cat or git diff to confirm an edit.`;
+The result is the verified on-disk state: files are re-read after writing, and only changed lines are shown (+N#HH:text added, ~N#HH:… with [-old-]{+new+} rewritten); those anchors work in the next call. Do not re-read, cat or git diff to confirm an edit.
+
+Example: one call changing two files:
+{"edits": [
+  {"path": "lib/a.ex", "old": "Repo.get(User, id)", "new": "Repo.get!(User, id)"},
+  {"path": "lib/a.ex", "from": "12#KT", "to": "15#BH", "action": "delete"},
+  {"path": "test/layers.json", "json": "/suites/-", "new": {"path": "test/a_test.exs", "layer": "unit"}},
+  {"glob": "lib/**/*.ex", "ast": "Logger.debug($MSG)", "action": "delete", "count": "all"}
+]}`;
 
 const SNIPPET = "Atomic multi-file edits: exact text, LINE#HASH ranges, regex, ast-grep, JSON pointer, file create/move/delete, in one call";
 

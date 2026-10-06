@@ -78,3 +78,20 @@ test("a file that was already broken stays editable", async () => {
   const r = await run({ path: "p.ts", edits: [{ old: "const b = 2;", new: "const b = 3;" }] });
   assert.match(text(r), /syntax: ok/);
 });
+
+test("the schema accepts the canonical shape and rejects the alternatives", async () => {
+  const { editSchema } = await import("../src/tool.ts");
+  const { Value } = await import("typebox/value");
+  const ok = (v: unknown) => Value.Check(editSchema, v);
+  assert.ok(ok({ path: "a.ts", edits: [{ old: "x", new: "y" }, { from: "3#KT", to: "5#BH", action: "delete" }] }));
+  assert.ok(ok({ edits: [{ path: "l.json", json: "/suites/-", new: { path: "t.exs", layer: "unit" } }, { glob: "**/*.ex", ast: "f($A)", new: "g($A)", count: "all" }] }));
+  assert.ok(!ok({ path: "a.ts", edits: [{ oldText: "x", newText: "y" }] }), "built-in aliases");
+  assert.ok(!ok({ edits: [{ path: "a.ts", edits: [{ old: "x", new: "y" }] }] }), "per-file groups");
+  assert.ok(!ok({ glob: "*.ts", edits: [{ old: "x", new: "y" }] }), "top-level glob");
+  assert.ok(!ok({ path: "a.ts", edits: [{ old: "x", new: "y", count: 0 }] }), "count below 1");
+});
+
+test("new must be a string outside json", async () => {
+  await writeFile(join(dir, "n.txt"), "x\n");
+  await assert.rejects(run({ path: "n.txt", edits: [{ old: "x", new: 1 }] }), /new must be a string; only json takes a JSON value/);
+});

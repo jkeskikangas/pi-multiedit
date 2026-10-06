@@ -66,20 +66,12 @@ function formatting(text: string): FormattingOptions {
   };
 }
 
-export function jsonEdit(text: string, pointer: string, action: JsonAction, valueText?: string): string {
+export function jsonEdit(text: string, pointer: string, action: JsonAction, value?: unknown): string {
   const errors: ParseError[] = [];
   const doc = parse(text, errors, { allowTrailingComma: true });
   if (errors.length > 0) throw new Error(`not valid JSON/JSONC (parse error at offset ${errors[0].offset})`);
   const { path, append } = resolvePath(doc, pointer);
-  let value: unknown;
-  if (action !== "delete") {
-    if (valueText === undefined) throw new Error(`json ${action} needs \`new\` (a JSON value)`);
-    try {
-      value = JSON.parse(valueText);
-    } catch {
-      value = valueText; // A bare word like integration means the string.
-    }
-  }
+  if (action !== "delete" && value === undefined) throw new Error(`json ${action} needs new (a JSON value)`);
   const options = { formattingOptions: formatting(text) };
   const parentIsArray = typeof path[path.length - 1] === "number";
   let edits;

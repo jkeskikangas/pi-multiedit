@@ -243,8 +243,8 @@ describe("regex, ast and json selectors", () => {
     const { plan, read } = await apply(dir, {
       path: "layers.json",
       edits: [
-        { json: "/suites/[path=b]/layer", new: '"integration"' },
-        { json: "/suites/[path=a]", action: "after", new: '{"path": "a2", "layer": "unit"}' },
+        { json: "/suites/[path=b]/layer", new: "integration" },
+        { json: "/suites/[path=a]", action: "after", new: {path: "a2", layer: "unit"} },
       ],
     });
     assert.deepEqual(plan.failures, []);
@@ -256,7 +256,7 @@ describe("regex, ast and json selectors", () => {
 
   test("json append with - and delete", async () => {
     const dir = await setup({ "c.json": '{"a": [1, 2], "b": true}\n' });
-    const { read } = await apply(dir, { path: "c.json", edits: [{ json: "/a/-", new: "3" }, { json: "/b", action: "delete" }] });
+    const { read } = await apply(dir, { path: "c.json", edits: [{ json: "/a/-", new: 3 }, { json: "/b", action: "delete" }] });
     assert.deepEqual(JSON.parse((await read("c.json"))!), { a: [1, 2, 3] });
   });
 });
@@ -264,17 +264,17 @@ describe("regex, ast and json selectors", () => {
 describe("forms models actually send (from evals)", () => {
   test("json [key=value] values may contain slashes", async () => {
     const dir = await setup({ "l.json": '{"suites": [{"path": "test/a.exs", "layer": "unit"}]}\n' });
-    const { plan, read } = await apply(dir, { path: "l.json", edits: [{ json: "/suites/[path=test/a.exs]/layer", new: '"integration"' }] });
+    const { plan, read } = await apply(dir, { path: "l.json", edits: [{ json: "/suites/[path=test/a.exs]/layer", new: "integration" }] });
     assert.deepEqual(plan.failures, []);
     assert.equal(JSON.parse((await read("l.json"))!).suites[0].layer, "integration");
   });
 
-  test("json new may be a JSON value, or a bare string", async () => {
+  test("json new is the JSON value itself: objects, and plain strings", async () => {
     const dir = await setup({ "c.json": '{"a": [], "b": "x"}\n' });
     const { plan, read } = await apply(dir, {
       path: "c.json",
       edits: [
-        { json: "/a/-", new: { path: "p", n: 1 } as unknown as string },
+        { json: "/a/-", new: { path: "p", n: 1 } },
         { json: "/b", new: "integration" },
       ],
     });
@@ -282,35 +282,19 @@ describe("forms models actually send (from evals)", () => {
     assert.deepEqual(JSON.parse((await read("c.json"))!), { a: [{ path: "p", n: 1 }], b: "integration" });
   });
 
-  test("an anchor copied with its content works, and a line number off by a little is corrected by content", async () => {
+  test("an anchor copied with its content works; with a wrong line number it is refused", async () => {
     const src = lines("a", "// BEGIN legacy", "x", "// END legacy", "b");
     const dir = await setup({ "f.ts": src });
-    const begin = anchorOf(2, "// BEGIN legacy").replace(/^2#/, "1#");
-    const { plan, read } = await apply(dir, {
-      path: "f.ts",
-      edits: [{ from: `${begin}:// BEGIN legacy`, to: `${anchorOf(4, "// END legacy")}:// END legacy`, action: "delete" }],
-    });
+    const begin = `${anchorOf(2, "// BEGIN legacy")}:// BEGIN legacy`;
+    const end = `${anchorOf(4, "// END legacy")}:// END legacy`;
+    const slipped = await apply(dir, { path: "f.ts", edits: [{ from: begin.replace(/^2#/, "1#"), to: end, action: "delete" }] });
+    assert.match(slipped.plan.failures[0].message, /content does not match line 1/);
+    const { plan, read } = await apply(dir, { path: "f.ts", edits: [{ from: begin, to: end, action: "delete" }] });
     assert.deepEqual(plan.failures, []);
     assert.equal(await read("f.ts"), lines("a", "b"));
-    assert.match(plan.notes[0].text, /line 1 → 2/);
   });
 
-  test("a top-level glob is the default scope, like a top-level path", async () => {
-    const dir = await setup({ "a.py": "total(1)\n", "b.py": "total(2)\n" });
-    const { plan, read } = await apply(dir, { glob: "*.py", edits: [{ old: "total(", new: "order_total(", count: 2 }] } as never);
-    assert.deepEqual(plan.failures, []);
-    assert.equal(await read("b.py"), "order_total(2)\n");
-  });
 
-  test("edits grouped per file as {path, edits: [...]} are flattened in order", async () => {
-    const dir = await setup({ "a.txt": "one two\n", "b.txt": "three\n" });
-    const { plan, read } = await apply(dir, {
-      edits: [{ path: "a.txt", edits: [{ old: "one", new: "1" }, { old: "two", new: "2" }] }, { path: "b.txt", old: "three", new: "3" }],
-    } as never);
-    assert.deepEqual(plan.failures, []);
-    assert.equal(await read("a.txt"), "1 2\n");
-    assert.equal(await read("b.txt"), "3\n");
-  });
 
   test("an anchor whose content does not match is refused even when the hash matches", async () => {
     const dir = await setup({ "f.ts": lines("one", "two") });

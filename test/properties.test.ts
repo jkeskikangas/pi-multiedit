@@ -135,7 +135,7 @@ test("json set changes only the addressed value", () => {
       const keys = Object.keys(obj);
       const key = keys[pick % keys.length];
       const text = JSON.stringify({ data: obj }, null, 2) + "\n";
-      const out = jsonEdit(text, `/data/${key}`, "replace", JSON.stringify(next));
+      const out = jsonEdit(text, `/data/${key}`, "replace", next);
       assert.deepEqual(JSON.parse(out), { data: { ...obj, [key]: next } });
       assert.ok(out.endsWith("}\n"));
     }),
