@@ -132,6 +132,15 @@ describe("text selector", () => {
     assert.ok(hint.includes(`${anchorOf(2, "  def handle(conn, params) do")}:  def handle(conn, params) do`), hint);
   });
 
+  test("the nearest hint favours the line containing most of the missed text, even a long one", async () => {
+    const dir = await setup({
+      "a.ex": lines("defmodule A do", "  def fetch_user(id), do: Repo.get!(User, id)", "", "  def fetch_company(id) do", "    :ok", "  end", "end"),
+    });
+    const { plan } = await apply(dir, { path: "a.ex", edits: [{ old: "def fetch_usr(id)", new: "x" }] });
+    const first = plan.failures[0].hints![0];
+    assert.ok(first.includes("def fetch_user(id)"), first);
+  });
+
   test("a retried edit (old gone, new present) fails with a hint naming where new already is", async () => {
     const dir = await setup({ "a.txt": lines("x", "new text") });
     const { plan } = await apply(dir, { path: "a.txt", edits: [{ old: "old text", new: "new text" }] });

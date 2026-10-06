@@ -123,8 +123,10 @@ export function nearestHints(text: string, needle: string, max = 2): string[] {
   const want = splitLines(needle).filter((l) => l.trim() !== "");
   if (want.length === 0 || hay.length === 0) return [];
   const probe = want.reduce((a, b) => (b.trim().length > a.trim().length ? b : a)).trim();
+  // Rank by how much of the probe a line contains, so a long line holding a near-copy beats a
+  // short line that is merely similar overall; overall similarity breaks ties.
   const scored = hay
-    .map((line, i) => ({ i, score: similarity(line.trim(), probe) }))
+    .map((line, i) => ({ i, score: coverage(line.trim(), probe) + similarity(line.trim(), probe) / 100 }))
     .filter((c) => c.score >= 0.5)
     .sort((a, b) => b.score - a.score);
   const picked: number[] = [];
@@ -146,6 +148,15 @@ function bigrams(s: string): Map<string, number> {
     m.set(g, (m.get(g) ?? 0) + 1);
   }
   return m;
+}
+
+/** Share of `probe`'s character bigrams that also occur in `line`. */
+function coverage(line: string, probe: string): number {
+  if (probe.length < 2) return line.includes(probe) ? 1 : 0;
+  const have = bigrams(line);
+  let hit = 0;
+  for (const [g, n] of bigrams(probe)) hit += Math.min(n, have.get(g) ?? 0);
+  return hit / (probe.length - 1);
 }
 
 /** Dice coefficient over character bigrams. */
