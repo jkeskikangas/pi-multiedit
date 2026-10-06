@@ -1,0 +1,56 @@
+{
+  "name": "pi-multiedit",
+  "version": "0.1.0",
+  "description": "Transactional multi-file edit tool for pi: text, regex, line-anchor, ast-grep and JSON selectors in one atomic call",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "extension",
+    "edit"
+  ],
+  "license": "MIT",
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@ast-grep/lang-elixir": "^0.0.7",
+    "@ast-grep/lang-python": "^0.0.6",
+    "@ast-grep/napi": "^0.45.3",
+    "diff": "^9.0.0",
+    "jsonc-parser": "^3.3.1",
+    "xxhashjs": "^0.2.2"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^1.0.3",
+    "@types/node": "^26.6.4",
+    "@types/xxhashjs": "^0.2.4",
+    "fast-check": "^4.10.2",
+    "typescript": "^7.0.2"
+  },
+  "files": [
+    "index.ts",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=1.0.3",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "author": "Jarno Keskikangas",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jkeskikangas/pi-multiedit.git"
+  },
+  "homepage": "https://github.com/jkeskikangas/pi-multiedit#readme",
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}
