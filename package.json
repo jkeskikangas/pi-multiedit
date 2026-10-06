@@ -1,6 +1,6 @@
 {
   "name": "pi-multiedit",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Transactional multi-file edit tool for pi: text, regex, line-anchor, ast-grep and JSON selectors in one atomic call",
   "type": "module",
   "keywords": [

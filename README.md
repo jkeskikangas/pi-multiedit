@@ -136,14 +136,17 @@ docs, a Python rename that adds a parameter, and a TypeScript config and docs ch
 |---|---|---|---|---|
 | gpt-6-luna, pi built-in edit | 6/6 | 41 | 18 | 105 s |
 | gpt-6-luna, pi-hashline-edit | 6/6 | 50 | 20 | 113 s |
-| gpt-6-luna, pi-multiedit | 6/6 | 27 | 6 | 105 s |
+| gpt-6-luna, pi-multiedit | 6/6 | 23 | 7 | 75 s |
 | claude-sonnet-5-5, pi built-in edit | 6/6 | 23 | 5 | 74 s |
 | claude-sonnet-5-5, pi-hashline-edit | 6/6 | 21 | 4 | 72 s |
-| claude-sonnet-5-5, pi-multiedit | 6/6 | 19 | 7 | 57 s |
+| claude-sonnet-5-5, pi-multiedit | 6/6 | 18 | 6 | 46 s |
 
 Every tool got every task right, so the differences are in effort. With pi-multiedit, 11 of 12
-runs made the whole change in one edit call, with no edit errors. Six runs per row show a
-direction, not a significant result.
+runs made the whole change in one edit call. The one exception was a correct refusal: GPT dropped
+trailing commas, the syntax check refused the call, and the retry fixed them. Total input tokens
+were 30% lower than with the built-in edit for GPT and 5% lower for Sonnet, whose prompt is cached.
+Six runs per row show a direction, not a significant result, and wall time varies a lot between
+runs.
 
 ## Limits
 

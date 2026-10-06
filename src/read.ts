@@ -17,9 +17,9 @@ const IMAGE = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 
 const schema = Type.Object(
   {
-    path: Type.String({ description: "Path to the file to read (relative or absolute)" }),
-    offset: Type.Optional(Type.Integer({ minimum: 1, description: "First line to return (1-indexed)" })),
-    limit: Type.Optional(Type.Integer({ minimum: 1, description: "Maximum number of lines to return" })),
+    path: Type.String(),
+    offset: Type.Optional(Type.Integer({ minimum: 1, description: "first line, 1-based" })),
+    limit: Type.Optional(Type.Integer({ minimum: 1 })),
   },
   { additionalProperties: false },
 );
@@ -28,7 +28,7 @@ export function registerReadTool(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "read",
     label: "read",
-    description: `Read a file. Text lines come back as LINE#HASH:content; pass those anchors to edit (from/to) to target lines without retyping them. Use offset/limit to page; output is capped at ${DEFAULT_MAX_LINES} lines or ${formatSize(DEFAULT_MAX_BYTES)}. Images are returned as attachments.`,
+    description: `Read a file. Lines come back as N#HH:content; use the anchors in edit (from/to). Page with offset/limit (cap ${DEFAULT_MAX_LINES} lines or ${formatSize(DEFAULT_MAX_BYTES)}). Images come back as attachments.`,
     promptSnippet: "Read files; text lines carry LINE#HASH anchors for edit",
     parameters: schema,
     async execute(id, params, signal, onUpdate, ctx) {
