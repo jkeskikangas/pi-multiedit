@@ -1,0 +1,15 @@
+Implement this change in the repository:
+
+fix(care): restrict the domain verification token to company admins (SEC4)
+
+The `Care.Accounts.CompanyDomain` read policy admits any active company member, and that includes the `verification_token` field (the DNS TXT challenge that proves domain control).
+
+Change:
+- `Care.Accounts.CompanyDomain` gains `field_policies`: `verification_token` is readable only under the existing `Care.Accounts.Checks.ActiveCompanyMembership, role: :admin` check (the same check the write policies use). Every other field stays `authorize_if always()`, so row-level read access is unchanged. A `field_policy_bypass` keeps platform admins' access (actor attribute `platform_admin?` is true), mirroring the resource's policy bypass.
+- `verification_token` becomes `public? true`: Ash rejects field policies on private attributes at compile time. Add a short comment saying it is public only so the field policy applies.
+- A member now reads the token as `%Ash.ForbiddenField{}`.
+- The `Care.CompanyDomains` moduledoc, which says its reads admit any active member, should note that the DNS challenge token is visible only to company admins.
+
+Tests: in the company-member read policy test, expose the company owner from the setup context and add a test that a plain member gets `%Ash.ForbiddenField{}` for `verification_token`, while the owning company admin and a platform admin get a binary token.
+
+Do not run mix, tests or build tools; make the change and stop.

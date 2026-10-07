@@ -1,0 +1,6 @@
+#!/bin/sh
+# Exp A: e1-e4 x {multi,builtin,native} x {opus,sonnet} x 2 reps, 4 in parallel
+E=$(cd "$(dirname "$0")" && pwd)
+for r in 1 2; do for t in e1 e2 e3 e4; do for m in "opus claude-opus-5-5" "sonnet claude-sonnet-5-5"; do for h in multi builtin native; do
+  set -- $m; echo "$t $1 $h $2 $r"
+done; done; done; done | xargs -P 4 -L 1 sh -c 'sh "'$E'/run_l.sh" $0 $1 $2 $3 $4; echo "done $0 $1 $2 r$4 $(cat '$E'/runs/$0-$1-$2-r$4.exit)"'

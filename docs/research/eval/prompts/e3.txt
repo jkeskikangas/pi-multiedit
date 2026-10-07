@@ -1,0 +1,14 @@
+Implement this change in the repository:
+
+Label support Slack alerts and ping the channel without personal data
+
+Support alerts (new-work, unclaimed-work and response-due notifications) now include one Slack channel broadcast mention and a fixed deployment label, so the message text becomes `[<label>] <!channel> <existing template text> <queue link>`, with the Finnish templates and the "Avaa asiakaspalvelun työjono" link text unchanged.
+
+- The customer-service notification config struct gains an `environment_label` field. It is derived from the environment passed to `parse/3`, never from the raw config map: `prod`/`production` -> "prod", `prerelease` -> "prerelease", `staging` -> "staging", `dev`/`development` -> "dev", `test` -> "test" (atoms or strings). Any other environment fails configuration validation (`{:error, :configuration_needed}`).
+- `load/0` uses the `:deployment_env` app setting when present, falling back to `:app_env`, so prerelease (which runs the production app profile) cannot mislabel alerts as prod.
+- The queue-URL origin check uses the normalized label.
+- Messages contain only the static environment label, the mention, the fixed event text and the generic staff-queue link.
+
+Tests: add a rules test that every known alias normalizes to its label and a property test that arbitrary `"unknown:" <> text` environments are rejected; make the Slack sender test assert the exact payload (channel, text, unfurl flags) for every kind, destination and environment, with synthetic personal-data keys and an untrusted `environment_label` in the raw config ignored, plus a test that a production app profile with deployment env "prerelease" is labelled `[prerelease]`.
+
+Do not run mix, tests or build tools; make the change and stop.

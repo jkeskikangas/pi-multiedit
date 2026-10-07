@@ -1,0 +1,8 @@
+Make the following four changes to this repository, one after the other, each completely before starting the next. Do not run tests or builds.
+
+1. Swap the parameter order of resolveToCwd so it becomes resolveToCwd(cwd, filePath), and update every caller, including tests.
+2. Add a required fourth parameter contextLines: number to computeEditsDiff (pass it on to where the diff is generated), and pass 4 at every existing call site, including tests.
+3. Rename the exported helper isToolCallEventType to isToolCallOfType everywhere in the source code and docs (definition, re-exports, imports, uses, examples), but do not change CHANGELOG.md.
+4. Add the one-line comment /** Key for the per-file mutation queue: the resolved real path. */ directly above the function that computes the key pi's per-file mutation queue locks on.
+
+When all four are done, reply with a one-paragraph summary of what you changed.

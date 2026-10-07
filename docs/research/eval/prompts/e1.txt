@@ -1,0 +1,15 @@
+Implement this change in the repository:
+
+fix(care): reject token-less legacy sessions in VerifiedSession (SEC3)
+
+`CareWeb.VerifiedSession.resolve/1` also accepts a session keyed `"user" => "<jti>:<subject>"`. It resolves that subject straight to a user with no JWT verification, so a revoked token's legacy form is still admitted. Care has only ever written `"user_token"` sessions (the user resource requires token presence for authentication), so the legacy branch is unreachable today, but it would bypass revocation the moment anything new called it.
+
+Change: delete the `"user"` clause together with its private helpers (the subject resolution and jti stripping). Anything other than a verified `user_token` now resolves to `nil`. Remove any alias that becomes unused.
+
+Tests: the existing patient-cases channel test that asserts a `"user"` subject session resolves to the patient must instead check that
+- a valid current `user_token` resolves to the user;
+- a subject placed in `user_token` is rejected;
+- after the token is revoked, the same `user_token` is rejected;
+- a revoked token's legacy `"user" => jti <> ":" <> subject` form and a bare `"user" => subject` are both rejected (`nil`).
+
+Do not run mix, tests or build tools; make the change and stop.

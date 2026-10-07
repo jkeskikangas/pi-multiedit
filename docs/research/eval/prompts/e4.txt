@@ -1,0 +1,11 @@
+Implement this change in the repository:
+
+feat(core): add optional doctor presence and specialty to the case contract
+
+The conversation header shows a presence mark and the doctor's role, and no backend supplies either. Rather than delete the designed elements, the case record contract gains the two fields the design needs: `doctor_presence` (`online | away | offline`) and `doctor_specialty`, both optional and nullable, so Care's current case JSON parses unchanged under `strictObject`. The specialty is a semantic token (lowercase snake_case, e.g. `general_practitioner`) the client maps to catalog copy, never server-authored prose.
+
+The Mock API is deliberately ahead of Care here and populates both (`online`, `general_practitioner`) on its permanent doctor-chat aggregate, so dev and the demo host show the designed header. The shared Care-shaped cases-read fixture stays Care-shaped — Care's own controller test asserts its key set against real output — so the mock's cases tests that compare against that fixture drop exactly these two provisional keys and stay exact about everything else, and the list test asserts the doctor-chat case's provisional values. The horizon scenarios state neither field (they set both to null), because they are the Care-parity states the screen tests assert against.
+
+Document both fields as "Mock only" rows in the REST API state table, next to the other mock-only additive fields.
+
+Do not run mix, tests or build tools; make the change and stop.
