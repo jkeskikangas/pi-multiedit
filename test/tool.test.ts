@@ -157,3 +157,16 @@ test("a file that keeps changing gives up after three attempts", async () => {
     /Nothing was written: c3\.ts kept changing during 3 attempts/,
   );
 });
+
+test("parallel edit calls in one process both land; neither loses the other's change", async () => {
+  const { applyEdits } = await import("../src/tool.ts");
+  const fs = { read: (abs: string) => readFile(abs, "utf8").catch(() => null), list: async () => [] };
+  for (let i = 0; i < 20; i++) {
+    await writeFile(join(dir, "par.ts"), "const a = 1;\nconst b = 2;\n");
+    await Promise.all([
+      applyEdits(dir, { edits: [{ path: "par.ts", old: "const a = 1;", new: "const a = 10;" }] } as never, fs),
+      applyEdits(dir, { edits: [{ path: "par.ts", old: "const b = 2;", new: "const b = 20;" }] } as never, fs),
+    ]);
+    assert.equal(await readFile(join(dir, "par.ts"), "utf8"), "const a = 10;\nconst b = 20;\n", `iteration ${i}`);
+  }
+});

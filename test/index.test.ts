@@ -13,4 +13,8 @@ test("the extension withdraws pi's write tool: whole-file edits replace it", asy
   } as never);
   await handlers.get("session_start")!({}, {});
   assert.deepEqual(active, ["read", "bash", "edit", "grep"]);
+  // Tree navigation restores the transcript's tool set; the extension withdraws write again.
+  active = ["read", "bash", "edit", "write"];
+  await handlers.get("session_tree")!({}, {});
+  assert.deepEqual(active, ["read", "bash", "edit"]);
 });

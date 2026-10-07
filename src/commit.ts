@@ -16,7 +16,20 @@ export type FileChange = {
   mode?: number;
 };
 
-type Done = { target: string; before: string | null; backup?: string };
+type Done = { target: string; before: string | null; after: string | null; backup?: string };
+
+let tail: Promise<unknown> = Promise.resolve();
+
+/**
+ * Runs commits one at a time within this process. A re-check and the renames after it are many
+ * awaits apart, so two parallel edit calls could both pass the check and the later rename would
+ * drop the earlier change. Held only for the milliseconds of a commit, never during planning.
+ */
+export function serially<T>(fn: () => Promise<T>): Promise<T> {
+  const run = tail.then(fn, fn);
+  tail = run.catch(() => {});
+  return run;
+}
 
 /** A file changed on disk after planning; the caller may re-plan against the new content. */
 export class ConflictError extends Error {
@@ -77,20 +90,23 @@ export async function commit(changes: FileChange[]): Promise<void> {
   const done: Done[] = [];
   try {
     for (const c of resolved) {
+      // Checked again right before each file's own write, to keep the window to another writer small.
+      if ((await readOrNull(c.target)) !== c.before) throw new ConflictError([c.abs]);
       if (c.after === null) {
         const backup = tmpName(c.target);
         await rename(c.target, backup);
-        done.push({ target: c.target, before: c.before, backup });
+        done.push({ target: c.target, before: c.before, after: null, backup });
         continue;
       }
       if (c.before === null) await mkdir(dirname(c.target), { recursive: true });
       await writeAtomic(c.target, c.after, c.mode);
-      done.push({ target: c.target, before: c.before });
+      done.push({ target: c.target, before: c.before, after: c.after });
     }
   } catch (e) {
     const failed = await rollback(done);
-    const tail = failed.length ? ` Rollback FAILED for: ${failed.join(", ")} — inspect them.` : " All files were restored.";
-    throw new Error(`write failed: ${(e as Error).message}.${tail}`);
+    if (e instanceof ConflictError && failed.length === 0) throw e;
+    const note = failed.length ? ` Not restored (changed meanwhile, or a write error): ${failed.join(", ")} — inspect them.` : " All files were restored.";
+    throw new Error(`write failed: ${(e as Error).message}.${note}`);
   }
   await Promise.all(done.filter((d) => d.backup).map((d) => unlink(d.backup!).catch(() => {})));
 }
@@ -99,6 +115,11 @@ async function rollback(done: Done[]): Promise<string[]> {
   const failed: string[] = [];
   for (const d of [...done].reverse()) {
     try {
+      // Restore only what still holds our own content: anything else is another writer's change.
+      if ((await readOrNull(d.target)) !== d.after) {
+        failed.push(d.target);
+        continue;
+      }
       if (d.backup) await rename(d.backup, d.target);
       else if (d.before === null) await unlink(d.target).catch((e) => (e.code === "ENOENT" ? undefined : Promise.reject(e)));
       else await writeAtomic(d.target, d.before, (await stat(d.target).catch(() => undefined))?.mode);

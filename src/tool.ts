@@ -10,7 +10,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Container, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { commit, ConflictError, drift, type FileChange } from "./commit.ts";
+import { commit, ConflictError, drift, serially, type FileChange } from "./commit.ts";
 import { Planner, toRaw, type EditRequest, type Failure, type PlanFs } from "./engine.ts";
 import { renderReport, type FileReport } from "./feedback.ts";
 import { anchorOf } from "./hash.ts";
@@ -172,7 +172,7 @@ const ATTEMPTS = 3;
  * edits are re-planned against the new content (optimistic concurrency, no locks): selectors that
  * still match apply on top of the other change; ones whose target changed fail like any miss.
  */
-export async function applyEdits(cwd: string, params: Params, fs: PlanFs) {
+export async function applyEdits(cwd: string, params: Params, fs: PlanFs, signal?: AbortSignal) {
   const rebased = new Set<string>();
   for (let attempt = 1; ; attempt++) {
     const planner = new Planner(cwd, fs);
@@ -194,17 +194,22 @@ export async function applyEdits(cwd: string, params: Params, fs: PlanFs) {
     };
     const noteText = plan.notes.map((n) => `step ${n.edit}: ${n.text}`).join("\n");
     if (changes.length === 0) {
-      return { content: [{ type: "text" as const, text: ["No changes: the edits leave every file as it was.", noteText].filter(Boolean).join("\n") }], details };
+      return { content: [{ type: "text" as const, text: ["No changes: the edits leave every file as it was.", noteText].filter(Boolean).join("\n") + concurrent }], details };
     }
     const syntax = syntaxSummary(reports);
     if (syntax.broken && !params.allowSyntaxErrors) {
       throw new Error(
-        `Nothing was written: the edit introduces parse errors. Fix them in the retry, or set allowSyntaxErrors if the parser is wrong.\n${syntax.warning}`,
+        `Nothing was written: the edit introduces parse errors. Fix them in the retry, or set allowSyntaxErrors if the parser is wrong.\n${syntax.warning}${concurrent}`,
       );
     }
 
+    signal?.throwIfAborted();
+    let drifted: Awaited<ReturnType<typeof drift>>;
     try {
-      await commit(changes);
+      drifted = await serially(async () => {
+        await commit(changes);
+        return drift(changes);
+      });
     } catch (e) {
       if (!(e instanceof ConflictError)) throw e;
       for (const p of e.paths) rebased.add(planner.rel(p));
@@ -212,7 +217,6 @@ export async function applyEdits(cwd: string, params: Params, fs: PlanFs) {
       throw new Error(`Nothing was written: ${e.paths.map((p) => planner.rel(p)).join(", ")} kept changing during ${ATTEMPTS} attempts`);
     }
     details.written = true;
-    const drifted = await drift(changes);
     const disk = drifted.length
       ? `WARNING: on re-read these differ from what was written (another process changed them): ${drifted.map((d) => planner.rel(d.abs)).join(", ")}`
       : "re-read from disk: identical";
@@ -234,8 +238,7 @@ export function registerEditTool(pi: ExtensionAPI): void {
     promptGuidelines: GUIDELINES,
     parameters: editSchema,
     async execute(_id, params: Params, signal, _onUpdate, ctx: ExtensionContext) {
-      signal?.throwIfAborted();
-      return applyEdits(ctx.cwd, params, { read: readText, list: listFiles, canonical, isSymlink });
+      return applyEdits(ctx.cwd, params, { read: readText, list: listFiles, canonical, isSymlink }, signal);
     },
 
     renderCall(args: Params, theme) {

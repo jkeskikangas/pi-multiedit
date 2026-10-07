@@ -9,8 +9,8 @@ landed on disk, line by line.
 pi install npm:pi-multiedit
 ```
 
-It replaces pi's `read` and `edit` tools and withdraws `write`, since an edit without a selector
-creates or overwrites a file. Remove pi-hashline-edit if you have it installed: both register
+It replaces pi's `read` and `edit` tools and withdraws `write` (even if `--tools` names it), since
+an edit without a selector creates or overwrites a file. Remove pi-hashline-edit if you have it installed: both register
 `read` and `edit`.
 
 ## Why it's built this way
@@ -214,12 +214,19 @@ files, in order, and records which lines it changed. That record is what lets an
 last `read` still find the right lines after earlier edits in the same call have moved them. If
 any edit fails, the plan is thrown away.
 
-There are no locks. Just before writing, every file is checked against what was read during
+Planning takes no locks. Before writing, every file is checked against what was read during
 planning. If another agent, an editor or a formatter changed one in the meantime, the whole call is
 planned again against the new content, up to three times. Edits whose text is still there apply on
 top of the other change, and the result says so. An edit whose target was changed fails like any
-miss. Each file is written to a temporary file and renamed into place; if a write fails, the files
-already written are put back. Finally every file is read back and compared with what was intended.
+miss.
+
+Writing is serialised within the pi process: parallel edit calls commit one after the other, for
+the few milliseconds each takes, so neither can drop the other's change. Each file is checked once
+more just before its own write, written to a temporary file and renamed into place; if a write
+fails, the files already written are put back, unless something else has changed them since.
+Finally every file is read back and compared with what was intended. One limit remains: another
+program writing a file in the microseconds between that last check and the rename is overwritten
+without notice. Filesystems offer no way to replace a file only if it is unchanged.
 
 ## Requirements
 
