@@ -34,6 +34,8 @@ export type PlanFs = {
   /** The path with symlinks resolved, so aliases of one file share one state. Default: identity. */
   canonical?(abs: string): Promise<string>;
   isSymlink?(abs: string): Promise<boolean>;
+  /** The hash the model last saw for line `n` of `abs`, so a bare line number can be checked like an anchor. */
+  shownHash?(abs: string, n: number): string | undefined;
 };
 
 type LineChange = { line: number; removed: number; added: number; edit: number };
@@ -334,7 +336,22 @@ export class Planner {
   private locate(ref: string, st: FileState, after: number, role: string): { start: number; end: number; line: boolean } {
     const text = st.cur!;
     const rel = this.rel(st.abs);
-    const anchor = parseAnchor(ref);
+    let anchor = parseAnchor(ref);
+    // A bare line number refers to the file as this session last showed it; the stale check in
+    // mapAnchor then applies as for an anchor. A number for a file never shown has nothing to check.
+    const bare = /^\s*(\d+)\s*#?\s*$/.exec(ref);
+    if (!anchor && bare) {
+      const n = Number(bare[1]);
+      const hash = this.fs.shownHash?.(st.abs, n);
+      if (hash === undefined) {
+        throw new EditError(
+          `${role} "${ref.trim()}" is a line number without its hash, and ${rel} has not been shown by read or edit in this session; use the N#HH anchor from read, or quote the line's text`,
+          undefined,
+          rel,
+        );
+      }
+      anchor = { line: n, hash };
+    }
     if (anchor) {
       const line = this.mapAnchor(anchor, st, role);
       const starts = lineStarts(text);
