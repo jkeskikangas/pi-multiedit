@@ -7,7 +7,7 @@ import { after, before, test } from "node:test";
 import { registerReadTool } from "../src/read.ts";
 import { registerEditTool } from "../src/tool.ts";
 
-type Registered = { name: string; execute: Function };
+type Registered = { name: string; description?: string; execute: Function };
 const tools = new Map<string, Registered>();
 const pi = { registerTool: (t: Registered) => tools.set(t.name, t) };
 registerEditTool(pi as never);
@@ -108,4 +108,52 @@ test("the example in the tool description is valid JSON that the schema accepts"
   const description = tools.get("edit")!.description as string;
   const example = JSON.parse(description.slice(description.indexOf('{"edits"')));
   assert.ok(Value.Check(editSchema, example));
+});
+
+// A planning filesystem whose reads can simulate another writer changing a file after it was read.
+async function editWith(params: object, onRead: (path: string, n: number) => Promise<void>) {
+  const { applyEdits } = await import("../src/tool.ts");
+  const reads = new Map<string, number>();
+  const fs = {
+    read: async (abs: string) => {
+      const text = await readFile(abs, "utf8").catch(() => null);
+      const n = (reads.get(abs) ?? 0) + 1;
+      reads.set(abs, n);
+      await onRead(abs, n);
+      return text;
+    },
+    list: async () => [],
+  };
+  return applyEdits(dir, params as never, fs);
+}
+
+test("a concurrent change elsewhere in the file is re-planned on, and both changes survive", async () => {
+  await writeFile(join(dir, "c1.ts"), "const a = 1;\nconst b = 2;\n");
+  const r = await editWith({ edits: [{ path: "c1.ts", old: "const a = 1;", new: "const a = 10;" }] }, async (abs, n) => {
+    if (abs.endsWith("c1.ts") && n === 1) await writeFile(join(dir, "c1.ts"), "const a = 1;\nconst b = 20;\n");
+  });
+  assert.equal(await readFile(join(dir, "c1.ts"), "utf8"), "const a = 10;\nconst b = 20;\n");
+  assert.match(text(r), /re-planned on top of concurrent changes to: c1\.ts/);
+});
+
+test("a concurrent change to the targeted text fails the edit, writing nothing of it", async () => {
+  await writeFile(join(dir, "c2.ts"), "const a = 1;\n");
+  await assert.rejects(
+    editWith({ edits: [{ path: "c2.ts", old: "const a = 1;", new: "const a = 10;" }] }, async (abs, n) => {
+      if (abs.endsWith("c2.ts") && n === 1) await writeFile(join(dir, "c2.ts"), "const a = 2;\n");
+    }),
+    /old not found[\s\S]*re-planned after concurrent changes to: c2\.ts/,
+  );
+  assert.equal(await readFile(join(dir, "c2.ts"), "utf8"), "const a = 2;\n");
+});
+
+test("a file that keeps changing gives up after three attempts", async () => {
+  await writeFile(join(dir, "c3.ts"), "x\n");
+  let k = 0;
+  await assert.rejects(
+    editWith({ edits: [{ path: "c3.ts", old: "x", new: "y" }] }, async (abs) => {
+      if (abs.endsWith("c3.ts")) await writeFile(join(dir, "c3.ts"), `x\n// ${k++}\n`);
+    }),
+    /Nothing was written: c3\.ts kept changing during 3 attempts/,
+  );
 });

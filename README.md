@@ -9,8 +9,9 @@ landed on disk, line by line.
 pi install npm:pi-multiedit
 ```
 
-It replaces pi's `read` and `edit` tools, so remove pi-hashline-edit if you have it installed:
-both register those names.
+It replaces pi's `read` and `edit` tools and withdraws `write`, since an edit without a selector
+creates or overwrites a file. Remove pi-hashline-edit if you have it installed: both register
+`read` and `edit`.
 
 ## Why it's built this way
 
@@ -208,16 +209,17 @@ direction, not a significant result.
 
 ## How it works
 
-A call is planned entirely in memory. Each step runs against the current in-memory state of its
+A call is planned entirely in memory. Each edit runs against the current in-memory state of its
 files, in order, and records which lines it changed. That record is what lets anchors from your
-last `read` still find the right lines after earlier steps in the same call have moved them. If
-any step fails, the plan is thrown away.
+last `read` still find the right lines after earlier edits in the same call have moved them. If
+any edit fails, the plan is thrown away.
 
-A successful plan is committed under pi's per-file locks, taken in a fixed order so that two
-concurrent calls can't deadlock. Before writing, each file is checked again to make sure nothing
-changed it since planning. Each file is then written to a temporary file and renamed into place.
-If a write fails, the files already written are put back. Finally every file is read back and
-compared with what was intended.
+There are no locks. Just before writing, every file is checked against what was read during
+planning. If another agent, an editor or a formatter changed one in the meantime, the whole call is
+planned again against the new content, up to three times. Edits whose text is still there apply on
+top of the other change, and the result says so. An edit whose target was changed fails like any
+miss. Each file is written to a temporary file and renamed into place; if a write fails, the files
+already written are put back. Finally every file is read back and compared with what was intended.
 
 ## Requirements
 

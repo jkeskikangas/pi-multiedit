@@ -5,14 +5,13 @@ import { promisify } from "node:util";
 import {
   generateDiffString,
   renderDiff,
-  withFileMutationQueue,
   type ExtensionAPI,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Container, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { commit, drift, type FileChange } from "./commit.ts";
-import { Planner, toRaw, type EditRequest, type Failure } from "./engine.ts";
+import { commit, ConflictError, drift, type FileChange } from "./commit.ts";
+import { Planner, toRaw, type EditRequest, type Failure, type PlanFs } from "./engine.ts";
 import { renderReport, type FileReport } from "./feedback.ts";
 import { anchorOf } from "./hash.ts";
 import { newSyntaxErrors } from "./syntax.ts";
@@ -166,10 +165,64 @@ function formatFailures(failures: Failure[], total: number): string {
   return lines.join("\n");
 }
 
-async function withLocks<T>(paths: string[], fn: () => Promise<T>): Promise<T> {
-  const sorted = [...new Set(paths)].sort();
-  const step = (i: number): Promise<T> => (i === sorted.length ? fn() : withFileMutationQueue(sorted[i], () => step(i + 1)));
-  return step(0);
+const ATTEMPTS = 3;
+
+/**
+ * Plans the edits, then commits them only if no file changed since it was read. On a conflict the
+ * edits are re-planned against the new content (optimistic concurrency, no locks): selectors that
+ * still match apply on top of the other change; ones whose target changed fail like any miss.
+ */
+export async function applyEdits(cwd: string, params: Params, fs: PlanFs) {
+  const rebased = new Set<string>();
+  for (let attempt = 1; ; attempt++) {
+    const planner = new Planner(cwd, fs);
+    const plan = await planner.run(params);
+    const concurrent = rebased.size ? `\n\n(re-planned after concurrent changes to: ${[...rebased].join(", ")})` : "";
+    if (plan.failures.length) throw new Error(formatFailures(plan.failures, plan.editCount) + concurrent);
+
+    const changed = [...plan.files.values()].filter((st) => st.cur !== st.orig || (st.orig === null && st.cur !== null));
+    const changes: FileChange[] = changed.map((st) => ({ abs: st.abs, before: st.raw, after: toRaw(st, st.cur) }));
+    const reports: FileReport[] = changed.map((st) => ({
+      path: planner.rel(st.abs),
+      status: st.cur === null ? "deleted" : st.orig === null ? "created" : "modified",
+      before: st.orig,
+      after: st.cur,
+    }));
+    const details: EditDetails = {
+      written: false,
+      files: reports.map((r) => ({ path: r.path, status: r.status, diff: generateDiffString(r.before ?? "", r.after ?? "").diff })),
+    };
+    const noteText = plan.notes.map((n) => `step ${n.edit}: ${n.text}`).join("\n");
+    if (changes.length === 0) {
+      return { content: [{ type: "text" as const, text: ["No changes: the edits leave every file as it was.", noteText].filter(Boolean).join("\n") }], details };
+    }
+    const syntax = syntaxSummary(reports);
+    if (syntax.broken && !params.allowSyntaxErrors) {
+      throw new Error(
+        `Nothing was written: the edit introduces parse errors. Fix them in the retry, or set allowSyntaxErrors if the parser is wrong.\n${syntax.warning}`,
+      );
+    }
+
+    try {
+      await commit(changes);
+    } catch (e) {
+      if (!(e instanceof ConflictError)) throw e;
+      for (const p of e.paths) rebased.add(planner.rel(p));
+      if (attempt < ATTEMPTS) continue;
+      throw new Error(`Nothing was written: ${e.paths.map((p) => planner.rel(p)).join(", ")} kept changing during ${ATTEMPTS} attempts`);
+    }
+    details.written = true;
+    const drifted = await drift(changes);
+    const disk = drifted.length
+      ? `WARNING: on re-read these differ from what was written (another process changed them): ${drifted.map((d) => planner.rel(d.abs)).join(", ")}`
+      : "re-read from disk: identical";
+    const out = [`Applied ${plan.editCount} step(s) to ${changes.length} file(s); ${disk}; ${syntax.summary}.`];
+    if (rebased.size) out.push(`re-planned on top of concurrent changes to: ${[...rebased].join(", ")}`);
+    if (syntax.warning) out.push(syntax.warning);
+    if (noteText) out.push(noteText);
+    out.push(renderReport(reports));
+    return { content: [{ type: "text" as const, text: out.join("\n\n") }], details };
+  }
 }
 
 export function registerEditTool(pi: ExtensionAPI): void {
@@ -181,47 +234,8 @@ export function registerEditTool(pi: ExtensionAPI): void {
     promptGuidelines: GUIDELINES,
     parameters: editSchema,
     async execute(_id, params: Params, signal, _onUpdate, ctx: ExtensionContext) {
-      const planner = new Planner(ctx.cwd, { read: readText, list: listFiles, canonical, isSymlink });
-      const plan = await planner.run(params);
-      if (plan.failures.length) throw new Error(formatFailures(plan.failures, plan.editCount));
       signal?.throwIfAborted();
-
-      const changed = [...plan.files.values()].filter((st) => st.cur !== st.orig || (st.orig === null && st.cur !== null));
-      const changes: FileChange[] = changed.map((st) => ({ abs: st.abs, before: st.raw, after: toRaw(st, st.cur) }));
-      const reports: FileReport[] = changed.map((st) => ({
-        path: planner.rel(st.abs),
-        status: st.cur === null ? "deleted" : st.orig === null ? "created" : "modified",
-        before: st.orig,
-        after: st.cur,
-      }));
-      const details: EditDetails = {
-        written: false,
-        files: reports.map((r) => ({ path: r.path, status: r.status, diff: generateDiffString(r.before ?? "", r.after ?? "").diff })),
-      };
-      const noteText = plan.notes.map((n) => `step ${n.edit}: ${n.text}`).join("\n");
-      const body = renderReport(reports);
-      if (changes.length === 0) {
-        return { content: [{ type: "text", text: ["No changes: the edits leave every file as it was.", noteText].filter(Boolean).join("\n") }], details };
-      }
-      const syntax = syntaxSummary(reports);
-      if (syntax.broken && !params.allowSyntaxErrors) {
-        throw new Error(
-          `Nothing was written: the edit introduces parse errors. Fix them in the retry, or set allowSyntaxErrors if the parser is wrong.\n${syntax.warning}`,
-        );
-      }
-
-      await withLocks(changes.map((c) => c.abs), () => commit(changes));
-      details.written = true;
-      const drifted = await drift(changes);
-      const disk = drifted.length
-        ? `WARNING: on re-read these differ from what was written (another process changed them): ${drifted.map((d) => planner.rel(d.abs)).join(", ")}`
-        : "re-read from disk: identical";
-      const out = [`Applied ${plan.editCount} step(s) to ${changes.length} file(s); ${disk}; ${syntax.summary}.`];
-      if (syntax.warning) out.push(syntax.warning);
-      if (noteText) out.push(noteText);
-      out.push(body);
-
-      return { content: [{ type: "text", text: out.join("\n\n") }], details };
+      return applyEdits(ctx.cwd, params, { read: readText, list: listFiles, canonical, isSymlink });
     },
 
     renderCall(args: Params, theme) {

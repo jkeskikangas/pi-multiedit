@@ -18,6 +18,15 @@ export type FileChange = {
 
 type Done = { target: string; before: string | null; backup?: string };
 
+/** A file changed on disk after planning; the caller may re-plan against the new content. */
+export class ConflictError extends Error {
+  paths: string[];
+  constructor(paths: string[]) {
+    super(`${paths.join(", ")} changed on disk while the edit was being planned; nothing was written`);
+    this.paths = paths;
+  }
+}
+
 async function target(abs: string): Promise<string> {
   try {
     return await realpath(abs);
@@ -56,9 +65,10 @@ async function writeAtomic(path: string, content: string, mode?: number): Promis
  */
 export async function commit(changes: FileChange[]): Promise<void> {
   const resolved = await Promise.all(changes.map(async (c) => ({ ...c, target: await target(c.abs) })));
+  const conflicts = [];
+  for (const c of resolved) if ((await readOrNull(c.target)) !== c.before) conflicts.push(c.abs);
+  if (conflicts.length) throw new ConflictError(conflicts);
   for (const c of resolved) {
-    const now = await readOrNull(c.target);
-    if (now !== c.before) throw new Error(`${c.abs} changed on disk while the edit was being planned; nothing was written`);
     if (c.before !== null) {
       await access(c.target, constants.W_OK);
       c.mode = (await stat(c.target)).mode & 0o7777;
