@@ -7,7 +7,9 @@ import {
 import { Container, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { commit, ConflictError, drift, serially, type FileChange } from "./commit.ts";
+import { join } from "node:path";
 import { canonical, isSymlink, listFiles, readText } from "./fs.ts";
+import { blastRadius, type Blast } from "./graph.ts";
 import { Planner, toRaw, type EditRequest, type Failure, type PlanFs } from "./engine.ts";
 import { renderReport, type FileReport } from "./feedback.ts";
 import { anchorOf } from "./hash.ts";
@@ -83,6 +85,33 @@ const GUIDELINES = [
 
 
 
+
+const BLAST_MS = 2000;
+
+const withinMs = <T>(p: Promise<T>, ms: number) =>
+  Promise.race([p, new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), ms).unref())]);
+
+/** Uses of definitions this call re-signed or removed, anchored so the next edit can fix them. */
+function renderBlast(blasts: Blast[]): string {
+  const out = ["blast radius:"];
+  for (const b of blasts) {
+    const files = new Set(b.sites.map((s) => s.path)).size;
+    const count = b.sites.length + b.truncated;
+    out.push(
+      b.change === "signature"
+        ? `changed definition ${b.name}: check its ${count} use${count === 1 ? "" : "s"} in ${files}${b.truncated ? "+" : ""} file${files === 1 ? "" : "s"} (was: ${b.was})`
+        : `${b.name} was renamed or removed but is still used ${count} time${count === 1 ? "" : "s"}; these would break:`,
+    );
+    let last = "";
+    for (const s of b.sites) {
+      if (s.path !== last) out.push(s.path);
+      last = s.path;
+      out.push(`  ${anchorOf(s.line, s.text)}:${s.text}`);
+    }
+    if (b.truncated) out.push(`  … ${b.truncated} more; search for ${b.name} to see them`);
+  }
+  return out.join("\n");
+}
 
 function syntaxSummary(reports: FileReport[]): { summary: string; warning?: string; broken?: boolean } {
   let checked = 0;
@@ -172,6 +201,11 @@ export async function applyEdits(cwd: string, params: Params, fs: PlanFs, signal
       : "re-read from disk: identical";
     const out = [`Applied ${plan.editCount} step(s) to ${changes.length} file(s); ${disk}; ${syntax.summary}.`];
     if (rebased.size) out.push(`re-planned on top of concurrent changes to: ${[...rebased].join(", ")}`);
+    const blast = await withinMs(
+      blastRadius(cwd, reports.map((r) => ({ path: r.path, before: r.before, after: r.after })), (p) => readText(join(cwd, p)).catch(() => null)),
+      BLAST_MS,
+    ).catch(() => undefined);
+    if (blast?.length) out.push(renderBlast(blast));
     if (syntax.warning) out.push(syntax.warning);
     if (noteText) out.push(noteText);
     out.push(renderReport(reports));

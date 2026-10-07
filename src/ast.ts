@@ -74,6 +74,7 @@ export function resolveLang(path: string): string {
 
 export type TreeNode = {
   kind(): string;
+  field(name: string): TreeNode | null;
   text(): string;
   isLeaf(): boolean;
   children(): TreeNode[];
