@@ -113,3 +113,44 @@ setting; the literature's wins are on retrieval benchmarks, not agent turns), su
 
 Fixed overhead is outside this programme but larger than any single lever here: pi startup and
 shutdown are 7–8 s of a 26–40 s run (Exp A). Measure it directly before optimising exploration.
+
+## H1 minimal test: result
+
+Prototype `context{symbols, terms?}` (`eval/context/index.ts`, ~200 lines, rg + an indentation-based
+block heuristic, anchored output, 30k-char budget) run on e1–e4 with the pi-multiedit arm as baseline
+(Exp A runs). Two attempts, as pre-registered: v1, then one revision (whole file for a defining file
+under 400 lines; free-text `terms` for behaviour words; "call this FIRST" as the description's first
+line). Sonnet 2 reps, Opus 1 rep per attempt.
+
+| Model | Arm | Pass | Wall s | Turns | Explore turns | `context` first | bash calls after `context` |
+|---|---|--:|--:|--:|--:|--:|--:|
+| opus | baseline (n=8) | 8/8 | 40 | 9.0 | 6.1 | – | – |
+| opus | v1 (n=4) | 4/4 | 41 | 10.2 | 7.2 | 0/4 | – |
+| opus | v2 (n=4) | 4/4 | 26 | 6.5 | 4.0 | 2/4 | 0.8 |
+| sonnet | baseline (n=8) | 7/8 | 26 | 8.1 | 5.4 | – | – |
+| sonnet | v1 (n=8) | 8/8 | 45 | 7.9 | 5.8 | 5/8 | 2.0 |
+| sonnet | v2 (n=8) | 6/8 | 36 | 7.4 | 5.1 | 7/8 | 2.9 |
+
+- **Adoption:** v1 failed the gate (Opus 0/4). v2 reached it for Sonnet (7/8) and half for Opus (2/4);
+  the description's first line mattered more than the system-prompt guideline, which was rendered in
+  both attempts.
+- **Opus, when it used the pack:** e1 5 turns (baseline 10 and 6), e2 6 turns (baseline 8 and 15); its
+  v2 average is −28% turns and −35% wall on n=4, two of them without the pack. Direction consistent
+  with H1, sample too small to count.
+- **Sonnet:** no turn gain (−9%), wall worse (+38%; two outliers of 94 s and 69 s), pass 6/8 (both e4
+  failures are the same `doctor_specialty` omission Sonnet built-in also made once; not pack-induced).
+  After the pack it still ran 2–3 bash calls: it re-read the primary files whole even when the pack had
+  returned them whole and anchored (e2: `company_domain.ex`, 201 lines, given in full, read again by
+  both models), read the whole test file after getting the matching test block, and searched for
+  concepts it had not passed as `terms` ("read policy", "company member"); on e3 it passed `parse/3` and
+  a Finnish string as symbols and got 391 chars back.
+- **Decision rule** (turns −20% and wall −15%, pass not worse, both models): **not met.** One model
+  shows the predicted effect at n=4, the other shows none and verifies regardless, which is round 1's
+  conclusion again. The pack adds 14–30k chars to the first turn and does not remove the model's own
+  reads.
+
+What a third attempt would change, if one is funded: tell the model in the result itself that the
+whole-file sections are complete reads (so it stops re-reading them); give test files whole below a
+size; make `terms` mandatory-by-example in the description; and run Opus with 2 reps to confirm or
+dissolve the −28%. The honest expectation from two attempts and round 1 is that Sonnet will keep its
+own chain and Opus will gain 1–3 turns when it adopts the tool.

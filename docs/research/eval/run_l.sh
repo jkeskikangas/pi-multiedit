@@ -4,12 +4,13 @@ E=$(cd "$(dirname "$0")" && pwd); T=$1; TAG=$2; H=$3; M=$4; R=${5:-1}; D=$E/runs
 rm -rf "$D" && git clone -q "$E/fixtures/$T" "$D"
 P=$(cat "$E/prompts/$T.txt")
 CS=~/.pi/agent/npm/node_modules/pi-claude-subscription/src/index.ts
-ME=~/work/pi-multiedit/index.ts; RT=$E/retire/index.ts
+ME=~/work/pi-multiedit/index.ts; RT=$E/retire/index.ts; S=$E
 case $M in claude-*) PROV=claude-sdk; EXT="-e $CS" ;; *) PROV=openai-codex; EXT="" ;; esac
 start=$(date +%s); cd "$D" || exit 1
 case $H in
   builtin) perl -e 'alarm 900; exec @ARGV' pi -ne -nc -ns -np --no-session $EXT --model $PROV/$M:low --mode json -p "$P" ;;
   multi)   perl -e 'alarm 900; exec @ARGV' pi -ne -nc -ns -np --no-session $EXT -e $ME --model $PROV/$M:low --mode json -p "$P" ;;
+  ctx|ctx2)     PI_CONTEXT_LOG=1 perl -e 'alarm 900; exec @ARGV' pi -ne -nc -ns -np --no-session $EXT -e $ME -e $S/context/index.ts --model $PROV/$M:low --mode json -p "$P" ;;
   retire)  PI_RETIRE_LOG=1 perl -e 'alarm 900; exec @ARGV' pi -ne -nc -ns -np --no-session $EXT -e $ME -e $RT --model $PROV/$M:low --mode json -p "$P" ;;
   native)  perl -e 'alarm 900; exec @ARGV' claude -p "$P" --model $M --effort low --output-format stream-json --verbose \
              --setting-sources "" --strict-mcp-config --no-session-persistence \
