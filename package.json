@@ -19,7 +19,6 @@
     "test": "node --experimental-strip-types --test test/*.test.ts"
   },
   "dependencies": {
-    "@ast-grep/lang-elixir": "^0.0.7",
     "@ast-grep/lang-python": "^0.0.6",
     "@ast-grep/napi": "^0.45.3",
     "diff": "^9.0.0",
@@ -31,7 +30,8 @@
     "@types/node": "^26.6.4",
     "@types/xxhashjs": "^0.2.4",
     "fast-check": "^4.10.2",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "@ast-grep/lang-elixir": "^0.0.7"
   },
   "files": [
     "index.ts",
@@ -42,7 +42,22 @@
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=1.0.3",
     "@earendil-works/pi-tui": "*",
-    "typebox": "*"
+    "typebox": "*",
+    "@ast-grep/lang-elixir": "*",
+    "@ast-grep/lang-go": "*",
+    "@ast-grep/lang-rust": "*",
+    "@ast-grep/lang-java": "*",
+    "@ast-grep/lang-kotlin": "*",
+    "@ast-grep/lang-ruby": "*",
+    "@ast-grep/lang-c": "*",
+    "@ast-grep/lang-cpp": "*",
+    "@ast-grep/lang-csharp": "*",
+    "@ast-grep/lang-php": "*",
+    "@ast-grep/lang-bash": "*",
+    "@ast-grep/lang-yaml": "*",
+    "@ast-grep/lang-lua": "*",
+    "@ast-grep/lang-scala": "*",
+    "@ast-grep/lang-swift": "*"
   },
   "author": "Jarno Keskikangas",
   "repository": {
@@ -52,5 +67,52 @@
   "homepage": "https://github.com/jkeskikangas/pi-multiedit#readme",
   "engines": {
     "node": ">=22.19.0"
+  },
+  "peerDependenciesMeta": {
+    "@ast-grep/lang-elixir": {
+      "optional": true
+    },
+    "@ast-grep/lang-go": {
+      "optional": true
+    },
+    "@ast-grep/lang-rust": {
+      "optional": true
+    },
+    "@ast-grep/lang-java": {
+      "optional": true
+    },
+    "@ast-grep/lang-kotlin": {
+      "optional": true
+    },
+    "@ast-grep/lang-ruby": {
+      "optional": true
+    },
+    "@ast-grep/lang-c": {
+      "optional": true
+    },
+    "@ast-grep/lang-cpp": {
+      "optional": true
+    },
+    "@ast-grep/lang-csharp": {
+      "optional": true
+    },
+    "@ast-grep/lang-php": {
+      "optional": true
+    },
+    "@ast-grep/lang-bash": {
+      "optional": true
+    },
+    "@ast-grep/lang-yaml": {
+      "optional": true
+    },
+    "@ast-grep/lang-lua": {
+      "optional": true
+    },
+    "@ast-grep/lang-scala": {
+      "optional": true
+    },
+    "@ast-grep/lang-swift": {
+      "optional": true
+    }
   }
 }

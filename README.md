@@ -15,11 +15,10 @@ both register those names.
 ## Why it's built this way
 
 Agents edit files badly in predictable ways. The usual edit tool changes one file per call, so a
-ten-file change takes ten calls, or the agent writes a throwaway Python script to do it. One
-codebase had 3,700 such scripts in a single month. Those scripts fail halfway and leave half a
-change on disk. Exact-text matching breaks on a trailing space the model didn't remember. After
-editing, the agent runs `git diff` or `cat` to see what happened. pi-multiedit is built so that
-none of this is needed.
+ten-file change takes ten calls, or the agent writes a throwaway Python script to do it. Those
+scripts fail halfway and leave half a change on disk. Exact-text matching breaks on a trailing
+space the model didn't remember. After editing, the agent runs `git diff` or `cat` to see what
+happened. pi-multiedit is built so that none of this is needed.
 
 - **All or nothing.** Every edit in a call is checked in memory before anything is written. If
   any one fails, no file changes, and the agent gets every failure at once with the nearby lines
@@ -163,8 +162,10 @@ a lot between runs (one 31-second GPT run accounts for most of its total).
   bash for links.
 - Each write replaces the file with a new one (temp file and rename). The file mode is kept, but
   hard links break and the owner and extended attributes are not kept.
-- `ast` and the syntax check cover TypeScript, JavaScript, CSS, HTML, Elixir and Python, chosen by
-  file extension. To add a language, install its `@ast-grep/lang-<name>` package next to this one.
+- `ast` and the syntax check cover TypeScript, JavaScript, CSS, HTML and Python out of the box,
+  chosen by file extension. Other languages (Elixir, Go, Rust, Java, Ruby and more) need their
+  grammar: `npm i @ast-grep/lang-<name> --prefix ~/.pi/agent/npm`. Without it, the syntax check
+  skips those files.
 
 ## How it works
 

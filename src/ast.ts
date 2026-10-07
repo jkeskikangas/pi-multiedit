@@ -66,7 +66,9 @@ export function resolveLang(path: string): string {
   const name = DYNAMIC[key] ?? key;
   if (name === "html") return "Html";
   if (!dynamicLanguages().has(name)) {
-    throw new Error(`no ast-grep grammar for "${key}" (${path}); install @ast-grep/lang-${name} next to pi-multiedit`);
+    throw new Error(
+      `no ast-grep grammar for "${key}" (${path}): install the npm package @ast-grep/lang-${name} where pi-multiedit is installed (for pi install npm:pi-multiedit: npm i @ast-grep/lang-${name} --prefix ~/.pi/agent/npm)`,
+    );
   }
   return name;
 }
