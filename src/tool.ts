@@ -14,6 +14,7 @@ import { commit, ConflictError, drift, serially, type FileChange } from "./commi
 import { Planner, toRaw, type EditRequest, type Failure, type PlanFs } from "./engine.ts";
 import { renderReport, type FileReport } from "./feedback.ts";
 import { anchorOf } from "./hash.ts";
+import { noteShown, shownHash } from "./shown.ts";
 import { newSyntaxErrors } from "./syntax.ts";
 import { splitLines } from "./text.ts";
 
@@ -57,7 +58,7 @@ const DESCRIPTION = `Edit files: many edits across many files in one call, all-o
 Each edit: a scope (path, or glob over git-visible files), at most one selector, optional action and count.
 Selectors:
 - old: exact text. A miss retries ignoring trailing whitespace/curly quotes, then a uniform indentation shift (re-indenting new), and says so.
-- from [+ to]: whole lines from one anchor to another, inclusive; an anchor is N#HH or N#HH:content from read (content checked exactly), or exact text.
+- from [+ to]: whole lines from one anchor to another, inclusive; an anchor is N#HH or N#HH:content from read (content checked exactly), a bare line number N of a file this session has shown (checked against that view), or exact text.
 - regex (+ flags): JS regex; new may use $1, $<name>, $&.
 - json: JSON pointer; segments are keys, indexes, - (append) or [key=value]. new is the JSON value itself, e.g. "unit", 3, {"path": "a"}.
 - none: the whole file (path only, no count): new creates or overwrites it; before/after prepend/append new as raw text (include the newlines) to an existing file; action "delete" deletes it.
@@ -218,6 +219,8 @@ export async function applyEdits(cwd: string, params: Params, fs: PlanFs, signal
       throw new Error(`Nothing was written: ${e.paths.map((p) => planner.rel(p)).join(", ")} kept changing during ${ATTEMPTS} attempts`);
     }
     details.written = true;
+    // The result shows the new state of every changed file, so bare line numbers may refer to it next.
+    for (const st of changed) if (st.cur !== null) noteShown(st.abs, st.cur);
     const disk = drifted.length
       ? `WARNING: on re-read these differ from what was written (another process changed them): ${drifted.map((d) => planner.rel(d.abs)).join(", ")}`
       : "re-read from disk: identical";
@@ -239,7 +242,7 @@ export function registerEditTool(pi: ExtensionAPI): void {
     promptGuidelines: GUIDELINES,
     parameters: editSchema,
     async execute(_id, params: Params, signal, _onUpdate, ctx: ExtensionContext) {
-      return applyEdits(ctx.cwd, params, { read: readText, list: listFiles, canonical, isSymlink }, signal);
+      return applyEdits(ctx.cwd, params, { read: readText, list: listFiles, canonical, isSymlink, shownHash }, signal);
     },
 
     renderCall(args: Params, theme) {

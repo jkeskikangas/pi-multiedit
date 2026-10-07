@@ -415,3 +415,24 @@ describe("feedback", () => {
     assert.ok(out.includes(`+${anchorOf(2, "log(total);")}:log(total);`), out.join("\n"));
   });
 });
+
+describe("bare line numbers", () => {
+  test("resolve against the shown view and are refused when stale or unseen", async () => {
+    const { noteShown, shownHash } = await import("../src/shown.ts");
+    const dir = await setup({ "a.ts": "one\ntwo\nthree\nfour\n" });
+    const abs = join(dir, "a.ts");
+    const p = () => new Planner(dir, { read: readOrNull, list: async () => ["a.ts"], shownHash });
+    // never shown: refused with a hint
+    let plan = await p().run({ edits: [{ path: "a.ts", from: "2", to: "3", action: "delete" }] });
+    assert.match(plan.failures[0]!.message, /line number without its hash/);
+    // shown: accepted, mapped through earlier edits in the call
+    noteShown(abs, await readFile(abs, "utf8"));
+    plan = await p().run({ edits: [{ path: "a.ts", old: "one", new: "ONE\nONE+" }, { path: "a.ts", from: "2", to: "3#", action: "delete" }] });
+    assert.equal(plan.failures.length, 0, JSON.stringify(plan.failures));
+    assert.equal(plan.files.get(abs)!.cur, "ONE\nONE+\nfour\n");
+    // the file changed since it was shown: the number is stale, refused like a stale anchor
+    await writeFile(abs, "zero\none\ntwo\nthree\nfour\n");
+    plan = await p().run({ edits: [{ path: "a.ts", from: "2", action: "delete" }] });
+    assert.match(plan.failures[0]!.message, /stale/);
+  });
+});

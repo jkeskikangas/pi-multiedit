@@ -11,6 +11,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { formatAnchored } from "./hash.ts";
+import { noteShown } from "./shown.ts";
 import { splitLines } from "./text.ts";
 
 const IMAGE = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
@@ -54,6 +55,7 @@ export function registerReadTool(pi: ExtensionAPI): void {
         picked.push(lines[n - 1]);
       }
       let out = formatAnchored(picked, first);
+      noteShown(abs, lines.join("\n"));
       const end = first + picked.length - 1;
       if (end < lines.length) out += `\n\n[Lines ${first}-${end} of ${lines.length}. Continue with offset=${end + 1}.]`;
       return { content: [{ type: "text", text: out }], details: undefined };
