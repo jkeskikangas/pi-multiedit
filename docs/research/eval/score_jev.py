@@ -4,7 +4,7 @@ E = os.path.dirname(os.path.abspath(__file__))
 sys.argv = ["x", "."]; exec(open(f"{E}/score_e.py").read().split("pat = re.compile")[0])  # reuse parse()
 agg = collections.defaultdict(collections.Counter); rows = []
 for jl in sorted(glob.glob(f"{E}/runs/*-r[12].jsonl")):
-    m = re.match(r".*/([exb]\d)-(opus|sonnet)-(multi|jev|jev2)-r(\d)\.jsonl", jl)
+    m = re.match(r".*/([exb]\d)-(opus|sonnet|sol61|luna)-(multi|jev|jev2)-r(\d)\.jsonl", jl)
     if not m: continue
     task, model, arm, rep = m.groups(); group = "treat" if task[0] == "e" else "pi"
     try: code, secs = open(jl[:-6] + ".exit").read().split()

@@ -230,3 +230,34 @@ whole-file sections are complete reads (so it stops re-reading them); give test 
 size; make `terms` mandatory-by-example in the description; and run Opus with 2 reps to confirm or
 dissolve the −28%. The honest expectation from two attempts and round 1 is that Sonnet will keep its
 own chain and Opus will gain 1–3 turns when it adopts the tool.
+
+### Seed v2 on gpt-6.1-sol and gpt-6-luna
+
+Same tasks and protocol (treat e1–e4, 2 reps, low reasoning effort, openai-codex provider), baseline =
+pi + pi-multiedit without the seed.
+
+| Model | Arm | Pass | Wall s | Turns | Calls | Edit errors |
+|---|---|--:|--:|--:|--:|--:|
+| gpt-6.1-sol | baseline | 8/8 | 40 | 6.2 | 6.0 | 0.00 |
+| gpt-6.1-sol | seed v2 | 8/8 | 33 | 4.5 | 4.0 | 0.00 |
+| gpt-6-luna | baseline | 5/8 | 21 | 8.0 | 9.8 | 0.12 |
+| gpt-6-luna | seed v2 | 5/8 | 19 | 5.0 | 5.1 | 0.38 |
+
+- **Sol 6.1 meets the decision rule:** turns −27%, calls −33%, wall −18%, pass 8/8 both arms. e1 is
+  again the ceiling: 2 turns, 1 call, 17 s in both reps (baseline 4–5 turns, 20–24 s).
+- **Luna:** turns −38%, calls −48%, wall −10%, pass 5/8 in both arms (its failures are its own: a
+  damaged clause on e1, a missing bypass policy on e2, a test omission on e3 — the same classes with and
+  without the seed). Edit errors rose 0.12 → 0.38: one anchor copied with the wrong content (`2#VN:…`),
+  one regex that matched 12 times; both are Luna's precision, not the seed's.
+- Across the four models, seed v2 cuts turns by 19–38% and calls by 28–48% with pass rate unchanged;
+  wall time falls for Opus (−10%), Sol (−18%) and Luna (−10%) and rises for Sonnet (+19%, e2-driven).
+  The seed's fixed cost (1.4–1.9 s, 25–30k chars) matters most for the fastest model.
+
+Cross-model summary, treat e1–e4, seed v2 vs baseline:
+
+| Model | Turns | Calls | Wall | Pass |
+|---|--:|--:|--:|---|
+| claude-opus-5-5 | −31% | −36% | −10% | 8/8 → 8/8 |
+| claude-sonnet-5-5 | −19% | −28% | +19% | 7/8 → 7/8 |
+| gpt-6.1-sol | −27% | −33% | −18% | 8/8 → 8/8 |
+| gpt-6-luna | −38% | −48% | −10% | 5/8 → 5/8 |
