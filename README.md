@@ -54,7 +54,7 @@ Each edit has a **scope**, at most one **selector**, and optionally an **action*
 
 | | Options |
 |---|---|
-| scope | `path`, or `glob` over git-visible files (e.g. `lib/**/*.ex`) |
+| scope | `path`, or `glob` over git-visible files (e.g. `src/**/*.ts`) |
 | selector | `old`: exact text · `from` + `to`: whole lines between two anchors, inclusive (an end may also be exact text) · `regex` (+ `flags`), where `new` may use `$1` and `$<name>` · `json`: a pointer whose segments may be `[key=value]` or `-` (append) · none: the whole file (`path` only) |
 | action | `replace` (default), `before`, `after`, `delete`. Every action except `delete` needs `new`; deleting is always explicit |
 | count | how many matches are expected across the scope: `1` (default), a number, or `"all"` |
@@ -69,10 +69,10 @@ site:
 
 ```json
 {"edits": [
-  {"path": "lib/accounts.ex", "from": "12#KT", "to": "15#BH", "action": "delete"},
-  {"path": "lib/accounts/api.ex", "new": "defmodule Accounts.Api do\nend\n"},
-  {"glob": "lib/**/*.ex", "old": "Repo.get(", "new": "Repo.get!(", "count": "all"},
-  {"path": "test/layers.json", "json": "/suites/-", "new": {"path": "test/accounts_api_test.exs", "layer": "integration"}}
+  {"path": "src/accounts.ts", "from": "12#KT", "to": "15#BH", "action": "delete"},
+  {"path": "src/accounts-api.ts", "new": "export const accountsApi = {};\n"},
+  {"glob": "src/**/*.ts", "old": "repo.find(", "new": "repo.findOrThrow(", "count": "all"},
+  {"path": "test/layers.json", "json": "/suites/-", "new": {"path": "test/accounts-api.test.ts", "layer": "integration"}}
 ]}
 ```
 
@@ -88,16 +88,16 @@ Applied 2 step(s) to 2 file(s); re-read from disk: identical; syntax: ok (2 file
 
 step 1: 2 matches in 1 file(s)
 
-lib/accounts.ex  +2 -2
-@@ 2
-~2#MJ:  def fetch_user(id), do: Repo.get{+!+}(User, id)
-@@ 5
-~5#TX:    Repo.get{+!+}(Company, id)
+src/accounts.ts  +2 -2
+@@ 4
+~4#TS:  return repo.[-find-]{+findOrThrow+}("users", id);
+@@ 8
+~8#QM:  return repo.[-find-]{+findOrThrow+}("companies", id);
 
 test/layers.json  +2 -1
 @@ 3
-~3#YS:    { "path": "test/accounts_test.exs", "layer": "unit" }{+,+}
-+4#JY:    { "path": "test/accounts_api_test.exs", "layer": "integration" }
+~3#HR:    { "path": "test/accounts.test.ts", "layer": "unit" }{+,+}
++4#QJ:    { "path": "test/accounts-api.test.ts", "layer": "integration" }
 ```
 
 On failure, nothing is written, and every failing step is listed with what the agent needs to fix
@@ -106,14 +106,18 @@ it in one retry:
 ```
 Nothing was written: 2 of 2 step(s) failed.
 
-step 1 (lib/accounts.ex): old not found in lib/accounts.ex
+step 1 (src/accounts.ts): old not found in src/accounts.ts
 nearest:
-1#MW:defmodule Accounts do
-2#KR:  def fetch_user(id), do: Repo.get(User, id)
-3#HW:
+2#KM:
+3#HW:export function fetchUser(id: string) {
+4#YR:  return repo.find("users", id);
+nearest:
+6#SY:
+7#JV:export function fetchCompany(id: string) {
+8#WN:  return repo.find("companies", id);
 
 step 2: old matched 2 times, expected 1. Add surrounding context, or set count to 2 or "all".
-  lib/accounts.ex: lines 2, 5
+  src/accounts.ts: lines 4, 8
 ```
 
 An edit that would leave a file unparsable is refused the same way:
@@ -121,8 +125,9 @@ An edit that would leave a file unparsable is refused the same way:
 ```
 Nothing was written: the edit introduces parse errors. Fix them in the retry, or set allowSyntaxErrors if the parser is wrong.
 New parse errors near:
-lib/accounts.ex
-  8#PT:end
+src/accounts.ts
+  9#WN:  return repo.find("companies", id);
+  10#BN:}
 ```
 
 When `old` doesn't match exactly, the tool tries again ignoring trailing whitespace and curly
@@ -132,28 +137,38 @@ the match is unique, and the result says when it happened.
 ## How it compares
 
 A small synthetic eval at low thinking: 4 tasks, each run twice per setup. The tasks: a multi-file
-Elixir change with a JSON registry and docs; a Python rename that adds a parameter; a TypeScript
-config and docs change; and converting 9 multi-line, nested `assertEqual(a, b)` calls across 3 test
-files to `expect(a).toEqual(b)`, next to look-alikes that must not change. Each model was run in its
-own vendor's agent with its native edit tool, and in pi with each edit tool.
+TypeScript change with a JSON registry and docs; a Python rename that adds a parameter; a
+TypeScript config and docs change; and converting 9 multi-line, nested `assertEqual(a, b)` calls
+across 3 test files to `expect(a).toEqual(b)`, next to look-alikes that must not change. Each model
+ran in its own vendor's agent with its native edit tool, and in pi with each edit tool.
 
-| Model and setup | Tasks passed | Tool calls | Edit calls | Edits via shell | Time |
-|---|---|---|---|---|---|
-| claude-sonnet-5-5, Claude Code (native Edit) | 8/8 | 37 | 8 | 8 | 130 s |
-| claude-sonnet-5-5, pi built-in edit | 8/8 | 31 | 5 | 10 | 106 s |
-| claude-sonnet-5-5, pi-hashline-edit | 8/8 | 27 | 4 | 7 | 102 s |
-| claude-sonnet-5-5, pi-multiedit | 8/8 | 28 | 9 | 0 | 101 s |
-| gpt-6-luna, Codex (native apply_patch) | 8/8 | 25 | 7 | 1 | 158 s |
-| gpt-6-luna, pi built-in edit | 7/8 | 54 | 21 | 1 | 145 s |
-| gpt-6-luna, pi-hashline-edit | 7/8 | 66 | 21 | 5 | 196 s |
-| gpt-6-luna, pi-multiedit | 8/8 | 36 | 11 | 0 | 146 s |
+| Model | Setup | Passed | Tool calls | Edit calls | Edits via shell | Input tokens | Output tokens | Time |
+|---|---|---|---|---|---|---|---|---|
+| claude-opus-5-5 | Claude Code (native) | 8/8 | 28 | 6 | 8 | 250k | 9.0k | 117 s |
+| | pi built-in edit | 8/8 | 32 | 8 | 7 | 155k | 7.8k | 111 s |
+| | pi-hashline-edit | 8/8 | 21 | 1 | 9 | 162k | 6.3k | 99 s |
+| | pi-multiedit | 8/8 | 27 | 8 | 0 | 171k | 6.7k | 107 s |
+| claude-sonnet-5-5 | Claude Code (native) | 8/8 | 35 | 6 | 8 | 265k | 9.7k | 122 s |
+| | pi built-in edit | 8/8 | 32 | 5 | 11 | 169k | 7.8k | 105 s |
+| | pi-hashline-edit | 8/8 | 27 | 4 | 7 | 173k | 7.1k | 99 s |
+| | pi-multiedit | 8/8 | 28 | 9 | 0 | 168k | 7.1k | 98 s |
+| gpt-6-sol | Codex (native) | 8/8 | 42 | 9 | 0 | 805k | 6.8k | 232 s |
+| | pi built-in edit | 8/8 | 62 | 26 | 2 | 122k | 5.5k | 200 s |
+| | pi-hashline-edit | 8/8 | 57 | 24 | 0 | 137k | 4.0k | 150 s |
+| | pi-multiedit | 8/8 | 32 | 8 | 0 | 86k | 3.7k | 147 s |
+| gpt-6-luna | Codex (native) | 8/8 | 28 | 7 | 1 | 689k | 5.5k | 163 s |
+| | pi built-in edit | 7/8 | 58 | 23 | 1 | 131k | 4.8k | 151 s |
+| | pi-hashline-edit | 7/8 | 63 | 20 | 5 | 211k | 6.1k | 199 s |
+| | pi-multiedit | 8/8 | 36 | 11 | 0 | 120k | 4.1k | 157 s |
 
 "Edits via shell" counts files changed with `sed -i` or Python scripts instead of the edit tool:
-no checks, no feedback, and the way half-applied changes happen. pi-multiedit was the only setup
-with none, and the only pi setup where GPT passed every task (the two failures were Python scripts
-on the `assertEqual` task). It also used the fewest input tokens for GPT (120k against Codex's 640k,
-83% of which Codex served from cache). For Sonnet, input was about the same as pi's built-in edit
-and about a third below Claude Code. Two runs per task show a direction, not a significant result.
+no checks, no feedback, and the way half-applied changes happen. pi-multiedit is the only setup
+with none for every model. GPT models gain the most: with gpt-6-sol it needed about half the tool
+calls of pi's other edit tools and the fewest input and output tokens of all four setups. Claude
+models already batch their edits, so their numbers are close; with them, pi-multiedit's gain is
+that every edit goes through the tool instead of `sed`. Input tokens include cached input, which
+the native agents use heavily (Codex served about 83% from cache). Two runs per task show a
+direction, not a significant result.
 
 ## Limits
 
@@ -166,7 +181,7 @@ and about a third below Claude Code. Two runs per task show a direction, not a s
 - Each write replaces the file with a new one (temp file and rename). The file mode is kept, but
   hard links break and the owner and extended attributes are not kept.
 - The syntax check covers TypeScript, JavaScript, CSS, HTML and Python out of the box, chosen by
-  file extension. Other languages (Elixir, Go, Rust, Java, Ruby and more) need their
+  file extension. Other languages (Go, Rust, Java, Ruby and more) need their
   grammar: `npm i @ast-grep/lang-<name> --prefix ~/.pi/agent/npm`. Without it, the syntax check
   skips those files.
 

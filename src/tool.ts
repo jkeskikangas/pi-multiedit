@@ -70,11 +70,11 @@ The result is the re-read disk state, changed lines only (+N#HH:text added, ~N#H
 
 Example:
 {"edits": [
-  {"path": "lib/a.ex", "old": "Repo.get(User, id)", "new": "Repo.get!(User, id)"},
-  {"path": "lib/a.ex", "from": "12#KT", "to": "15#BH", "action": "delete"},
-  {"path": "lib/b.ex", "new": "defmodule B do\\nend\\n"},
-  {"path": "test/layers.json", "json": "/suites/-", "new": {"path": "test/b_test.exs", "layer": "unit"}},
-  {"glob": "lib/**/*.ex", "regex": "Logger\\\\.debug\\\\(", "new": "Logger.info(", "count": "all"}
+  {"path": "src/a.ts", "old": "repo.find(id)", "new": "repo.findOrThrow(id)"},
+  {"path": "src/a.ts", "from": "12#KT", "to": "15#BH", "action": "delete"},
+  {"path": "src/b.ts", "new": "export const b = 1;\\n"},
+  {"path": "test/layers.json", "json": "/suites/-", "new": {"path": "test/b.test.ts", "layer": "unit"}},
+  {"glob": "src/**/*.ts", "regex": "console\\\\.debug\\\\(", "new": "console.info(", "count": "all"}
 ]}`;
 
 const SNIPPET = "All-or-nothing edits across many files in one call";
