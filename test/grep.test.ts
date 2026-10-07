@@ -52,3 +52,43 @@ test("the Jev re-ranker orders by probability and falls back to the given order 
   );
   assert.deepEqual((await prefersB("x", ranked)).map((r: { path: string }) => r.path), ["b.ts", "a.ts"]);
 });
+
+test("intent ranks source code above prose that repeats the task's words", async () => {
+  await mkdir(join(dir, "docs"), { recursive: true });
+  await writeFile(join(dir, "CHANGELOG.md"), "- theme: share the theme across package scopes\n- theme scopes theme package\n".repeat(5));
+  await writeFile(join(dir, "docs/themes.md"), "# Themes\nThemes in package scopes share the theme. theme package scope theme.\n".repeat(5));
+  await writeFile(join(dir, "src/theme.ts"), "export function loadTheme(scope: string) {\n  return scope;\n}\n");
+  const out = await call({ searches: [{ intent: "share theme across package scopes" }] });
+  assert.equal(out.split("\n").find((l) => /^(src|docs|CHANGELOG)/.test(l)), "src/theme.ts", out);
+});
+
+test("intent still prefers prose when the task is about docs", async () => {
+  const out = await call({ searches: [{ intent: "update the themes documentation about package scopes" }] });
+  assert.match(out.split("\n").find((l) => /^(src|docs|CHANGELOG)/.test(l)) ?? "", /^docs\/themes\.md|^CHANGELOG\.md/);
+});
+
+test("a pattern search caps its matches and says how many it left out", async () => {
+  await writeFile(join(dir, "src/many.ts"), Array.from({ length: 120 }, (_, i) => `export const item${i} = ${i};`).join("\n") + "\n");
+  const out = await call({ searches: [{ pattern: "export const item", path: "src/many.ts", context: 0 }] });
+  assert.match(out, /120 matches in 1 file/);
+  assert.equal(out.split("\n").filter((l) => /^\s*\d+#[A-Z]{2}:export const item/.test(l)).length, 50);
+  assert.match(out, /70 more matches not shown; narrow the search/);
+});
+
+test("the Jev re-ranker retries a failed call once, and keeps the locator's order if a call still fails", async () => {
+  const ranked = [{ path: "a.ts" }, { path: "b.ts" }, { path: "c.ts" }] as never[];
+  let calls = 0;
+  const flaky = jevReranker(
+    {
+      getAvailableOfType: async () => [{ provider: "typesafe", id: "jev-latest" }],
+      classify: async (_m: unknown, c: { state: { file: string } }) => {
+        calls++;
+        if (c.state.file === "a.ts") return { stopReason: "error", errorMessage: "429" };
+        return { stopReason: "stop", answers: { relevant: { type: "bool", probability: c.state.file === "c.ts" ? 0.9 : 0.2 } } };
+      },
+    } as never,
+    dir,
+  );
+  assert.deepEqual((await flaky("x", ranked)).map((r: { path: string }) => r.path), ["a.ts", "b.ts", "c.ts"]);
+  assert.equal(calls, 4, "a.ts was tried twice");
+});

@@ -30,6 +30,15 @@ const STOP = new Set(
     "read follow run task item brief protocol skill invoke first then before after into via per one two three").split(" "),
 );
 
+// Prose and generated files repeat a task's words far more than the code that implements it.
+const PROSE = /(^|\/)(CHANGELOG|HISTORY|NEWS|LICENSE)[^/]*$|\.(md|mdx|txt|rst|adoc)$|(^|\/)docs?\/|(^|\/)dist\/|\.lock$|-lock\.json$|\.generated\.|\.snap$|\.min\.js$/i;
+const ABOUT_PROSE = /\b(docs?|documentation|readme|changelog|guide|markdown|wording|copy)\b/i;
+
+/** Ranking weight of a file for an intent: prose counts a quarter unless the task is about prose. */
+export function fileWeight(path: string, intent: string): number {
+  return PROSE.test(path) && !ABOUT_PROSE.test(intent) ? 0.25 : 1;
+}
+
 const words = (text: string) => text.match(/[A-Za-z][A-Za-z0-9]*(?:[_.-][A-Za-z0-9]+)*/g) ?? [];
 
 /** Lowercase word parts of an identifier: `contextLines` → context, lines; `CONTEXT_LINES` → context, lines. */
@@ -59,7 +68,12 @@ export function termsOf(intent: string, max = 40): string[] {
     for (const p of ps) if (p.length >= 3 && !STOP.has(p)) plain.push(p);
   }
   for (let i = 0; i + 1 < plain.length; i++) if (plain[i] !== plain[i + 1]) for (const v of variants([plain[i], plain[i + 1]])) out.add(v);
-  for (const w of plain) if (w.length >= 4) out.add(w);
+  for (const w of plain) {
+    if (w.length < 4) continue;
+    out.add(w);
+    // A crude singular, so "scopes" in a task also finds `scope` in code.
+    if (w.length > 4 && w.endsWith("s") && !w.endsWith("ss")) out.add(w.endsWith("ies") ? w.slice(0, -3) + "y" : w.slice(0, -1));
+  }
   return [...out].slice(0, max);
 }
 
@@ -113,8 +127,12 @@ export async function locate(cwd: string, intent: string, opts: { top?: number; 
     const lower = t.toLowerCase();
     for (const file of all) if (file.toLowerCase().includes(lower)) score.set(file, (score.get(file) ?? 0) + 2 * idf[ti]);
   });
-  // Files that match several distinct terms are about the task, not about one common word.
-  for (const [file, s] of score) score.set(file, s * (1 + 0.5 * ((found.get(file)?.size ?? 1) - 1)));
+  // Code that matches several distinct terms is about the task, not about one common word. Prose
+  // naturally contains many of a task's words, so it gets no such bonus, only its lower weight.
+  for (const [file, s] of score) {
+    const w = fileWeight(file, intent);
+    score.set(file, s * (w < 1 ? w : 1 + 0.5 * ((found.get(file)?.size ?? 1) - 1)));
+  }
 
   const candidates = [...score.entries()].sort((a, b) => b[1] - a[1]).slice(0, Math.max(40, top * 3));
   const ranked: Located[] = [];
@@ -126,7 +144,8 @@ export async function locate(cwd: string, intent: string, opts: { top?: number; 
       continue;
     }
     const lines = splitLines(text);
-    const decl = (outlineLines(path, text) ?? []).filter((n) => terms.some((t) => lines[n - 1]?.toLowerCase().includes(t.toLowerCase())));
+    // Declarations are evidence of where code is defined; prose headings are not.
+    const decl = fileWeight(path, intent) < 1 ? [] : (outlineLines(path, text) ?? []).filter((n) => terms.some((t) => lines[n - 1]?.toLowerCase().includes(t.toLowerCase())));
     const ts = [...(found.get(path) ?? [])].sort((a, b) => idf[b] - idf[a]).map((i) => terms[i]);
     ranked.push({ path, score: s * (1 + Math.min(decl.length, 3)), terms: ts, declarations: decl, reference: false });
   }

@@ -18,9 +18,10 @@ export function jevReranker(registry: ExtensionContext["modelRegistry"], cwd: st
     const top = ranked.slice(0, CANDIDATES);
     const probs: (number | undefined)[] = [];
     for (let i = 0; i < top.length; i += PARALLEL) {
-      probs.push(...(await Promise.all(top.slice(i, i + PARALLEL).map((r) => relevance(registry, model, cwd, intent, r)))));
+      probs.push(...(await Promise.all(top.slice(i, i + PARALLEL).map(async (r) => (await relevance(registry, model, cwd, intent, r)) ?? relevance(registry, model, cwd, intent, r)))));
     }
-    if (probs.every((p) => p === undefined)) return ranked; // the service failed: keep the locator's order
+    // A failed call would sink its file to the bottom; a partial re-rank is worse than none.
+    if (probs.some((p) => p === undefined)) return ranked;
     const scored = top.map((r, i) => ({ r, p: probs[i] ?? 0 })).sort((a, b) => b.p - a.p).map((x) => x.r);
     return [...scored, ...ranked.slice(CANDIDATES)];
   };

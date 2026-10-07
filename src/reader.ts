@@ -24,6 +24,8 @@ export type ReadItem = {
 export type Reranker = (intent: string, ranked: Located[]) => Promise<Located[]>;
 
 const INTENT_TOP = 8;
+/** Matching lines one search shows; a wider search would flood the context. */
+const SEARCH_MAX_MATCHES = 50;
 
 export type ReadFs = {
   /** File text, null if absent; throws for directories, binary and non-UTF-8 files. */
@@ -247,6 +249,7 @@ export class Reader {
     const context = item.context ?? 2;
     const blocks: string[] = [];
     let matches = 0;
+    let shownMatches = 0;
     let hitFiles = 0;
     for (const path of await this.scope(item)) {
       let text: string | null;
@@ -261,11 +264,13 @@ export class Reader {
         continue;
       }
       const lines = splitLines(text);
-      const hits = lines.flatMap((l, k) => (re.test(l) ? [k + 1] : []));
-      if (hits.length === 0) continue;
-      matches += hits.length;
+      const all = lines.flatMap((l, k) => (re.test(l) ? [k + 1] : []));
+      if (all.length === 0) continue;
+      matches += all.length;
       hitFiles++;
-      if (this.budget.full) continue;
+      const hits = all.slice(0, Math.max(0, SEARCH_MAX_MATCHES - shownMatches));
+      if (this.budget.full || hits.length === 0) continue;
+      shownMatches += hits.length;
       const wanted = new Set<number>();
       for (const h of hits) for (let n = Math.max(1, h - context); n <= Math.min(lines.length, h + context); n++) wanted.add(n);
       const rows = this.rows(this.abs(path), lines, [...wanted].sort((a, b) => a - b));
@@ -274,7 +279,11 @@ export class Reader {
     }
     const scope = item.path ?? item.glob;
     const head = `search ${JSON.stringify(item.search)} in ${scope}: ${matches} match${matches === 1 ? "" : "es"} in ${hitFiles} file${hitFiles === 1 ? "" : "s"}`;
-    const cut = this.budget.full ? ["… output budget reached; narrow the search (a path, a tighter glob or pattern, or context: 0)"] : [];
+    const cut = this.budget.full
+      ? ["… output budget reached; narrow the search (a path, a tighter glob or pattern, or context: 0)"]
+      : matches > shownMatches
+        ? [`… ${matches - shownMatches} more matches not shown; narrow the search (a path, a tighter glob or pattern)`]
+        : [];
     this.out.push([head, ...blocks, ...cut].join("\n\n"));
   }
 
