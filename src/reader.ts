@@ -216,7 +216,9 @@ export class Reader {
       this.out.push(`${path}: unchanged since your last read (lines ${from}-${to}); its anchors are still valid. Read it again to get the text.`);
       return;
     }
-    const shaped = item.offset === undefined && item.limit === undefined && lines.length > LARGE_LINES ? this.shape(path, text, lines) : undefined;
+    // Under evaluation: PI_MULTIEDIT_SHAPE=0 turns large-read shaping off for the comparison.
+    const shapeOn = process.env.PI_MULTIEDIT_SHAPE !== "0";
+    const shaped = shapeOn && item.offset === undefined && item.limit === undefined && lines.length > LARGE_LINES ? this.shape(path, text, lines) : undefined;
     if (shaped) {
       const rows = this.rows(abs, lines, shaped.numbers);
       const taken = this.budget.take(rows);

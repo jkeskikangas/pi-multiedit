@@ -201,7 +201,8 @@ export async function applyEdits(cwd: string, params: Params, fs: PlanFs, signal
       : "re-read from disk: identical";
     const out = [`Applied ${plan.editCount} step(s) to ${changes.length} file(s); ${disk}; ${syntax.summary}.`];
     if (rebased.size) out.push(`re-planned on top of concurrent changes to: ${[...rebased].join(", ")}`);
-    const blast = await withinMs(
+    // Under evaluation: PI_MULTIEDIT_BLAST=0 turns blast radius off for the comparison.
+    const blast = process.env.PI_MULTIEDIT_BLAST === "0" ? undefined : await withinMs(
       blastRadius(cwd, reports.map((r) => ({ path: r.path, before: r.before, after: r.after })), (p) => readText(join(cwd, p)).catch(() => null)),
       BLAST_MS,
     ).catch(() => undefined);
