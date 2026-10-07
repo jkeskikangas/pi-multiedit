@@ -1,8 +1,7 @@
-// Structural selector backed by ast-grep. Loaded on first use: the native binding and grammars
-// cost nothing for sessions that never send an `ast` edit.
+// Tree-sitter parsing via ast-grep for the syntax check. Loaded on first use, so the native binding
+// and grammars cost nothing until an edited file needs checking.
 import { createRequire } from "node:module";
 import { extname } from "node:path";
-import type { Span } from "./text.ts";
 
 const require = createRequire(import.meta.url);
 
@@ -103,35 +102,4 @@ export function syntaxErrorLines(path: string, text: string): number[] | undefin
     stack.push(...node.children());
   }
   return [...lines].sort((a, b) => a - b);
-}
-
-const META = /\$\$\$([A-Z_][A-Z0-9_]*)|\$([A-Z_][A-Z0-9_]*)/g;
-
-/** Matches of `pattern`, outermost only, each with `template` expanded from its metavariables. */
-export function astFind(path: string, text: string, pattern: string, template: string): Span[] {
-  const grammar = resolveLang(path);
-  const root = load().parse(grammar, text).root();
-  const spans: Span[] = [];
-  for (const node of root.findAll(pattern)) {
-    const { start, end } = node.range();
-    if (spans.some((s) => start.index >= s.start && end.index <= s.end)) continue;
-    spans.push({ start: start.index, end: end.index, replacement: expand(node, text, template, start.index) });
-  }
-  return spans.sort((a, b) => a.start - b.start);
-}
-
-function expand(node: SgNode, text: string, template: string, at: number): string {
-  const filled = template.replace(META, (whole, multi: string | undefined, single: string | undefined) => {
-    if (multi) {
-      const nodes = node.getMultipleMatches(multi);
-      if (nodes.length === 0) return "";
-      return text.slice(nodes[0].range().start.index, nodes[nodes.length - 1].range().end.index);
-    }
-    const one = node.getMatch(single!);
-    return one ? one.text() : whole;
-  });
-  // ast-grep convention: continuation lines of a multi-line rewrite are relative to the match.
-  const lineStart = text.lastIndexOf("\n", at - 1) + 1;
-  const indent = /^[ \t]*/.exec(text.slice(lineStart, at))![0];
-  return filled.split("\n").map((l, i) => (i === 0 || l === "" ? l : indent + l)).join("\n");
 }

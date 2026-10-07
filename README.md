@@ -29,9 +29,8 @@ happened. pi-multiedit is built so that none of this is needed.
   doesn't reproduce text it might get slightly wrong. Anchors stay valid through the earlier
   edits in the same call, and a stale one is refused instead of hitting the wrong line.
 - **The right selector for the job.** Exact text for small changes, anchor ranges for blocks,
-  regex for patterns, [ast-grep](https://ast-grep.github.io) patterns for code shapes such as
-  every `Repo.get($S, $ID)` call, and JSON pointers for data files. Any of them can apply to one
-  file or to every file matching a glob.
+  regex for patterns, and JSON pointers for data files. Any of them can apply to one file or to
+  every file matching a glob.
 - **The result is the proof.** Files are re-read after writing and compared byte for byte with
   what was intended. The result shows only the lines that changed, as word diffs with fresh
   anchors the next call can use. There's nothing left to check with `git diff`.
@@ -56,7 +55,7 @@ Each edit has a **scope**, at most one **selector**, and optionally an **action*
 | | Options |
 |---|---|
 | scope | `path`, or `glob` over git-visible files (e.g. `lib/**/*.ex`) |
-| selector | `old`: exact text · `from` + `to`: whole lines between two anchors, inclusive (an end may also be exact text) · `regex` (+ `flags`), where `new` may use `$1` and `$<name>` · `ast`: an ast-grep pattern whose `$X` and `$$$X` can be reused in `new` · `json`: a pointer whose segments may be `[key=value]` or `-` (append) · none: the whole file (`path` only) |
+| selector | `old`: exact text · `from` + `to`: whole lines between two anchors, inclusive (an end may also be exact text) · `regex` (+ `flags`), where `new` may use `$1` and `$<name>` · `json`: a pointer whose segments may be `[key=value]` or `-` (append) · none: the whole file (`path` only) |
 | action | `replace` (default), `before`, `after`, `delete`. Every action except `delete` needs `new`; deleting is always explicit |
 | count | how many matches are expected across the scope: `1` (default), a number, or `"all"` |
 
@@ -162,8 +161,8 @@ a lot between runs (one 31-second GPT run accounts for most of its total).
   bash for links.
 - Each write replaces the file with a new one (temp file and rename). The file mode is kept, but
   hard links break and the owner and extended attributes are not kept.
-- `ast` and the syntax check cover TypeScript, JavaScript, CSS, HTML and Python out of the box,
-  chosen by file extension. Other languages (Elixir, Go, Rust, Java, Ruby and more) need their
+- The syntax check covers TypeScript, JavaScript, CSS, HTML and Python out of the box, chosen by
+  file extension. Other languages (Elixir, Go, Rust, Java, Ruby and more) need their
   grammar: `npm i @ast-grep/lang-<name> --prefix ~/.pi/agent/npm`. Without it, the syntax check
   skips those files.
 
@@ -195,8 +194,8 @@ npx tsc -p .        # typecheck
 ## Credits
 
 Hash-anchored lines come from [oh-my-pi](https://github.com/can1357/oh-my-pi), and the hashes
-match [pi-hashline-edit](https://github.com/RimuruW/pi-hashline-edit). Structural matching uses
-[ast-grep](https://ast-grep.github.io).
+match [pi-hashline-edit](https://github.com/RimuruW/pi-hashline-edit). The syntax check parses
+with [ast-grep](https://ast-grep.github.io)'s tree-sitter bindings.
 
 ## License
 

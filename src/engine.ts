@@ -1,7 +1,6 @@
 // Plans a whole request in memory: every edit is resolved against the current in-memory state of
 // its files, in order, and nothing touches disk here. A plan with any error is never committed.
 import { isAbsolute, matchesGlob, relative, resolve } from "node:path";
-import { astFind } from "./ast.ts";
 import { ANCHOR_PREFIX_RE, formatAnchored, lineHash, parseAnchor } from "./hash.ts";
 import { jsonEdit } from "./json.ts";
 import { findAll, fuzzyFind, lineAt, lineStarts, nearestHints, splitLines, type Fuzz, type Span } from "./text.ts";
@@ -14,7 +13,6 @@ export type EditSpec = {
   old?: string;
   regex?: string;
   flags?: string;
-  ast?: string;
   from?: string;
   to?: string;
   json?: string;
@@ -197,8 +195,8 @@ export class Planner {
       }
     }
     if (e.old !== undefined) e.old = norm(e.old);
-    const selectors = (["old", "regex", "ast", "from", "json"] as const).filter((k) => e[k] !== undefined);
-    if (selectors.length > 1) throw new EditError(`give at most one selector (old, from[+to], regex, ast, json); got ${selectors.join(", ")}`);
+    const selectors = (["old", "regex", "from", "json"] as const).filter((k) => e[k] !== undefined);
+    if (selectors.length > 1) throw new EditError(`give at most one selector (old, from[+to], regex, json); got ${selectors.join(", ")}`);
     if (e.path !== undefined && e.glob !== undefined) throw new EditError("give path or glob, not both");
     if (e.flags !== undefined && e.regex === undefined) throw new EditError("flags needs regex");
     if (e.to !== undefined && e.from === undefined) throw new EditError("to needs from");
@@ -289,13 +287,6 @@ export class Planner {
           spans.push({ start: m.index!, end: m.index! + m[0].length, replacement: expandRegex(m, e.new ?? "") });
         }
         return wrap(spans);
-      }
-      case "ast": {
-        try {
-          return wrap(astFind(st.abs, text, e.ast!, e.new ?? ""));
-        } catch (err) {
-          throw new EditError(`${this.rel(st.abs)}: ${(err as Error).message}`, undefined, this.rel(st.abs));
-        }
       }
       default:
         return this.range(e, st, action);

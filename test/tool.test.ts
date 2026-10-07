@@ -82,7 +82,7 @@ test("the schema accepts the canonical shape and rejects everything else", async
   const { Value } = await import("typebox/value");
   const ok = (v: unknown) => Value.Check(editSchema, v);
   assert.ok(ok({ edits: [{ path: "a.ts", old: "x", new: "y" }, { path: "a.ts", from: "3#KT", to: "5#BH", action: "delete" }] }));
-  assert.ok(ok({ edits: [{ path: "l.json", json: "/suites/-", new: { path: "t.exs" } }, { glob: "**/*.ex", ast: "f($A)", new: "g($A)", count: "all" }] }));
+  assert.ok(ok({ edits: [{ path: "l.json", json: "/suites/-", new: { path: "t.exs" } }, { glob: "**/*.ex", regex: "f\\((\\w+)\\)", new: "g($1)", count: "all" }] }));
   assert.ok(ok({ edits: [{ path: "new.ts", new: "x" }, { path: "old.ts", action: "delete" }], allowSyntaxErrors: true }));
   for (const [why, bad] of Object.entries({
     "top-level path": { path: "a.ts", edits: [{ old: "x", new: "y" }] },
@@ -90,7 +90,7 @@ test("the schema accepts the canonical shape and rejects everything else", async
     files: { files: [{ path: "a.ts", delete: true }] },
     dryRun: { edits: [], dryRun: true },
     until: { edits: [{ path: "a.ts", from: "x", until: "y" }] },
-    lang: { edits: [{ path: "a.ts", ast: "f()", lang: "ts" }] },
+    ast: { edits: [{ path: "a.ts", ast: "f($A)", new: "g($A)" }] },
     aliases: { edits: [{ path: "a.ts", oldText: "x", newText: "y" }] },
     groups: { edits: [{ path: "a.ts", edits: [{ old: "x", new: "y" }] }] },
     "count below 1": { edits: [{ path: "a.ts", old: "x", new: "y", count: 0 }] },
@@ -100,4 +100,12 @@ test("the schema accepts the canonical shape and rejects everything else", async
 test("new must be a string outside json", async () => {
   await writeFile(join(dir, "n.txt"), "x\n");
   await assert.rejects(run({ path: "n.txt", edits: [{ old: "x", new: 1 }] }), /new must be a string; only json takes a JSON value/);
+});
+
+test("the example in the tool description is valid JSON that the schema accepts", async () => {
+  const { editSchema } = await import("../src/tool.ts");
+  const { Value } = await import("typebox/value");
+  const description = tools.get("edit")!.description as string;
+  const example = JSON.parse(description.slice(description.indexOf('{"edits"')));
+  assert.ok(Value.Check(editSchema, example));
 });

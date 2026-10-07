@@ -216,7 +216,7 @@ describe("line anchors and ranges", () => {
   });
 });
 
-describe("regex, ast and json selectors", () => {
+describe("regex and json selectors", () => {
   test("regex with captures and named groups", async () => {
     const dir = await setup({ "a.ts": lines("foo(1, 2)", "foo(3, 4)") });
     const { read } = await apply(dir, {
@@ -226,30 +226,8 @@ describe("regex, ast and json selectors", () => {
     assert.equal(await read("a.ts"), lines("bar(2, 1)", "bar(4, 3)"));
   });
 
-  test("ast rewrites Elixir calls with metavariables", async () => {
-    const dir = await setup({
-      "a.ex": lines("defmodule A do", "  def f(x), do: Repo.get(User, x)", "  def g(y), do: Repo.get(Post, y) |> IO.inspect()", "end"),
-    });
-    const { plan, read } = await apply(dir, { path: "a.ex", edits: [{ ast: "Repo.get($S, $ID)", new: "Repo.get!($S, $ID)", count: 2 }] });
-    assert.deepEqual(plan.failures, []);
-    assert.equal(
-      await read("a.ex"),
-      lines("defmodule A do", "  def f(x), do: Repo.get!(User, x)", "  def g(y), do: Repo.get!(Post, y) |> IO.inspect()", "end"),
-    );
-  });
 
-  test("ast $$$ keeps argument lists verbatim in TypeScript", async () => {
-    const dir = await setup({ "a.ts": lines("log(a, b, c);", "log();") });
-    const { read } = await apply(dir, { path: "a.ts", edits: [{ ast: "log($$$ARGS)", new: "logger.info($$$ARGS)", count: "all" }] });
-    assert.equal(await read("a.ts"), lines("logger.info(a, b, c);", "logger.info();"));
-  });
 
-  test("ast rewrites only the outermost of nested matches, as ast-grep does", async () => {
-    const dir = await setup({ "n.ts": lines("wrap(wrap(x));") });
-    const { plan, read } = await apply(dir, { path: "n.ts", edits: [{ ast: "wrap($A)", new: "box($A)" }] });
-    assert.deepEqual(plan.failures, []);
-    assert.equal(await read("n.ts"), lines("box(wrap(x));"));
-  });
 
   test("json sets a field on the element selected by key, keeping formatting", async () => {
     const json = '{\n  "suites": [\n    { "path": "a", "layer": "unit" },\n    { "path": "b", "layer": "unit" }\n  ]\n}\n';

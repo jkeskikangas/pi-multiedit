@@ -28,7 +28,6 @@ const editItem = Type.Object(
     old: Type.Optional(Type.String()),
     regex: Type.Optional(Type.String()),
     flags: Type.Optional(Type.String()),
-    ast: Type.Optional(Type.String()),
     from: Type.Optional(Type.String()),
     to: Type.Optional(Type.String()),
     json: Type.Optional(Type.String()),
@@ -61,7 +60,6 @@ Selectors:
 - old: exact text. A miss retries ignoring trailing whitespace/curly quotes, then a uniform indentation shift (re-indenting new), and says so.
 - from [+ to]: whole lines from one anchor to another, inclusive; an anchor is N#HH or N#HH:content from read (content checked exactly), or exact text.
 - regex (+ flags): JS regex; new may use $1, $<name>, $&.
-- ast: ast-grep pattern; reuse $X / $$$X in new.
 - json: JSON pointer; segments are keys, indexes, - (append) or [key=value]. new is the JSON value itself, e.g. "unit", 3, {"path": "a"}.
 - none: the whole file (path only, no count): new creates or overwrites it; before/after prepend/append new as raw text (include the newlines) to an existing file; action "delete" deletes it.
 action: replace (default), before, after, delete. Every action except delete needs new; deleting is always explicit. On line ranges new is whole lines; new: "" removes them.
@@ -74,16 +72,16 @@ Example:
 {"edits": [
   {"path": "lib/a.ex", "old": "Repo.get(User, id)", "new": "Repo.get!(User, id)"},
   {"path": "lib/a.ex", "from": "12#KT", "to": "15#BH", "action": "delete"},
-  {"path": "lib/b.ex", "new": "defmodule B do\nend\n"},
+  {"path": "lib/b.ex", "new": "defmodule B do\\nend\\n"},
   {"path": "test/layers.json", "json": "/suites/-", "new": {"path": "test/b_test.exs", "layer": "unit"}},
-  {"glob": "lib/**/*.ex", "ast": "Logger.debug($MSG)", "action": "delete", "count": "all"}
+  {"glob": "lib/**/*.ex", "regex": "Logger\\\\.debug\\\\(", "new": "Logger.info(", "count": "all"}
 ]}`;
 
 const SNIPPET = "All-or-nothing edits across many files in one call";
 
 const GUIDELINES = [
   "Make all edits for a change, across files, in one edit call; never edit files with python, sed, perl or heredocs.",
-  "Use from/to anchors for blocks, old for short snippets, glob + count for repeated rewrites, ast for code shapes, json for data.",
+  "Use from/to anchors for blocks, old for short snippets, glob + count for repeated rewrites, json for data.",
 ];
 
 function isBinary(buf: Buffer): boolean {
