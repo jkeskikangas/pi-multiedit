@@ -310,3 +310,31 @@ present → seed on; no key → silent no-op), with the bare-line-number accepta
 successor branch. Open items before a default-on: 4 reps on the pi and tulka task sets, a budget cap
 per repository size, and a check that a wrong whole-file seed cannot mislead (none observed in 96
 seeded runs, but the failure mode exists).
+
+## gpt-6-luna: reasoning effort ladder on the priority ("fast") tier
+
+Same tasks, 4 reps per cell except max (stopped at 10 and 9 runs once the picture was clear). The
+priority tier is `service_tier: "priority"` (`eval/fast/index.ts`); pi prices it at 2×, so the cost
+column for the fast arms is doubled from the reported figure.
+
+| Effort | Arm | Pass | Wall s | Turns | Calls | Total tok | Cost $ |
+|---|---|--:|--:|--:|--:|--:|--:|
+| low (standard tier) | baseline | 7/16 | 20 | 7.5 | 9.5 | 184k | 0.006 |
+| low (standard tier) | seed v3 | 8/16 | 18 | 4.3 | 4.4 | 76k | 0.003 |
+| medium, fast | baseline | 7/16 | 22 | 8.1 | 9.7 | 199k | 0.012 |
+| medium, fast | seed v3 | 11/16 | 19 | 5.1 | 5.0 | 102k | 0.008 |
+| high, fast | baseline | 16/16 | 44 | 10.8 | 15.4 | 372k | 0.018 |
+| high, fast | seed v3 | **15/16** | **37** | **6.6** | 7.7 | 130k | 0.010 |
+| max, fast | baseline (n=10) | 9/10 | 111 | 12.1 | 22.0 | 455k | 0.028 |
+| max, fast | seed v3 (n=9) | 8/9 | 89 | 6.3 | 12.2 | 317k | 0.022 |
+
+- **Correctness is an effort cliff between medium and high:** 7/16 at low and medium, 16/16 at high,
+  9/10 at max. Luna's failures at low effort were care, not capability.
+- **Effort buys correctness by exploring more, not by thinking longer:** calls go 9.5 → 15.4 → 22 and
+  wall 20 → 44 → 111 s from low to max; reasoning tokens stay around 1k per turn.
+- **The seed halves that exploration at every effort level** (calls −45–55%, turns −35–48%) and keeps
+  the pass rate; at high it also cuts total tokens by 65% (372k → 130k), because the seeded files
+  replace the re-reads that max/high Luna otherwise does.
+- **Luna's best operating point is high + seed: 15/16, 37 s, 6.6 turns, $0.01.** It still loses to
+  gpt-6.1-sol at low effort with the seed (16/16, 33 s, 3.9 turns, $0.05 standard tier) on wall and
+  turns, and to Opus/Sonnet with the seed (28/27 s, 4.5/4.6 turns) on wall; it wins on cost.
