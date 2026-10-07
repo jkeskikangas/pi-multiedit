@@ -6,6 +6,12 @@ correctness, wall time, turns, tool calls. Tokens and cost are reported but seco
 
 ## Summary
 
+**Update after the exploration round** ([exploration-hypotheses.md](exploration-hypotheses.md)): the
+search/read phase *is* movable, but not by better search — by a classifier-selected seed of whole files
+at turn 0. With TypeSafe Jev choosing among `rg` candidates, turns fell 37–52% and wall time 10–33%
+across Opus 5.5, Sonnet 5.5, gpt-6.1-sol and gpt-6-luna on the treat tasks, pass rate unchanged. The
+text below describes the state before that result.
+
 On the user's real codebase (treat: Elixir with Finnish strings, heredocs and sigils, plus a TypeScript
 workspace), pi-multiedit is correct and fast, and it is at parity with pi's built-in edit on every primary
 metric. Both pi setups finish small and medium tasks in 8–9 turns and 24–40 s; Claude Code needs
