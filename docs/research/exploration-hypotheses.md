@@ -338,3 +338,34 @@ column for the fast arms is doubled from the reported figure.
 - **Luna's best operating point is high + seed: 15/16, 37 s, 6.6 turns, $0.01.** It still loses to
   gpt-6.1-sol at low effort with the seed (16/16, 33 s, 3.9 turns, $0.05 standard tier) on wall and
   turns, and to Opus/Sonnet with the seed (28/27 s, 4.5/4.6 turns) on wall; it wins on cost.
+
+## Is this the best way to use Jev?
+
+It is the right kind of use — a cheap, task-aware classifier deciding what the expensive model gets to
+read, applied once where the model's own judgement is weakest (turn 0, before it has seen anything) —
+and it is the only exploration lever in two rounds that moved every model. It is also the simplest
+possible version. What it does not do, in the order the data says to try:
+
+1. **Candidate recall is the bottleneck, not ranking.** Jev only sees files that `rg` found from the
+   prompt's identifiers and 2–4-word windows; a file no word of the prompt names cannot be seeded
+   (e2 before v3). A name-only pass would widen recall cheaply: one request listing the paths under
+   the task's directory (names only, no content) with a bool per path, then content-level scoring of
+   the survivors. Jev handled 20 files with evidence per request in ~0.8 s; names-only should allow
+   100+ per request.
+2. **Section-level seeds for large files.** Files over 400 lines are never seeded whole, and those
+   are exactly the ones the models then read in pieces (treat's `caseAuthority.ts`, `horizonScenarios.ts`
+   on e4; e4 is the task where the seed helped least). Jev over tree-sitter outline entries (one bool per
+   top-level function/test block, or a `score`) would seed the needed sections anchored, within the same
+   budget. Round 1's `outline.ts` has the parsing.
+3. **Budget by expected value, not a fixed threshold.** p ≥ 0.6 and a 40k-char cap are guesses. The
+   Claude cost was flat because the seed is cache-written at 5× read price; a calibrated cut (seed a file
+   when p × its read probability × its size beats the write cost) would keep the turn gain and recover
+   the token cost. Jev's probabilities looked well calibrated here (0.99/0.97/0.61 on e1 were the three
+   files the reference commit touched or called).
+4. **Not worth it:** mid-session re-ranking of search hits (round 1: no gain, and the model has context
+   by then), and per-turn "enough context, edit now" prompting (the models already edit first when the
+   seed is complete — 100% on e1).
+
+What stays true regardless of design: the seed must be labelled as already read and carry anchors, or
+the model re-reads it (H1's `context` tool showed that), and Jev's latency (1.4–1.9 s for two requests)
+is below the noise of a single API turn.
