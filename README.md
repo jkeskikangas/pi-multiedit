@@ -142,26 +142,47 @@ TypeScript config and docs change; and converting 9 multi-line, nested `assertEq
 across 3 test files to `expect(a).toEqual(b)`, next to look-alikes that must not change. Each model
 ran in its own vendor's agent with its native edit tool, and in pi with each edit tool.
 
-| Model | Setup | Passed | Tool calls | Edit calls | Edits via shell | Input tokens | Output tokens | Time |
-|---|---|---|---|---|---|---|---|---|
-| claude-opus-5-5 | Claude Code (native) | 8/8 | 28 | 6 | 8 | 250k | 9.0k | 117 s |
-| | pi built-in edit | 8/8 | 32 | 8 | 7 | 155k | 7.8k | 111 s |
-| | pi-hashline-edit | 8/8 | 21 | 1 | 9 | 162k | 6.3k | 99 s |
-| | pi-multiedit | 8/8 | 27 | 8 | 0 | 171k | 6.7k | 107 s |
-| claude-sonnet-5-5 | Claude Code (native) | 8/8 | 35 | 6 | 8 | 265k | 9.7k | 122 s |
-| | pi built-in edit | 8/8 | 32 | 5 | 11 | 169k | 7.8k | 105 s |
-| | pi-hashline-edit | 8/8 | 27 | 4 | 7 | 173k | 7.1k | 99 s |
-| | pi-multiedit | 8/8 | 28 | 9 | 0 | 168k | 7.1k | 98 s |
-| gpt-6-sol | Codex (native) | 8/8 | 42 | 9 | 0 | 805k | 6.8k | 232 s |
-| | pi built-in edit | 8/8 | 62 | 26 | 2 | 122k | 5.5k | 200 s |
-| | pi-hashline-edit | 8/8 | 57 | 24 | 0 | 137k | 4.0k | 150 s |
-| | pi-multiedit | 8/8 | 32 | 8 | 0 | 86k | 3.7k | 147 s |
-| gpt-6-luna | Codex (native) | 8/8 | 28 | 7 | 1 | 689k | 5.5k | 163 s |
-| | pi built-in edit | 7/8 | 58 | 23 | 1 | 131k | 4.8k | 151 s |
-| | pi-hashline-edit | 7/8 | 63 | 20 | 5 | 211k | 6.1k | 199 s |
-| | pi-multiedit | 8/8 | 36 | 11 | 0 | 120k | 4.1k | 157 s |
+**claude-opus-5-5**
 
-"Edits via shell" counts files changed with `sed -i` or Python scripts instead of the edit tool:
+| Setup | Tool calls | Edit calls | Shell edits | Tokens in | Tokens out | Time |
+|---|--:|--:|--:|--:|--:|--:|
+| Claude Code | 28 | 6 | 8 | 250k | 9.0k | 117s |
+| pi built-in | 32 | 8 | 7 | 155k | 7.8k | 111s |
+| pi-hashline-edit | 21 | 1 | 9 | 162k | 6.3k | 99s |
+| **pi-multiedit** | 27 | 8 | **0** | 171k | 6.7k | 107s |
+
+**claude-sonnet-5-5**
+
+| Setup | Tool calls | Edit calls | Shell edits | Tokens in | Tokens out | Time |
+|---|--:|--:|--:|--:|--:|--:|
+| Claude Code | 35 | 6 | 8 | 265k | 9.7k | 122s |
+| pi built-in | 32 | 5 | 11 | 169k | 7.8k | 105s |
+| pi-hashline-edit | 27 | 4 | 7 | 173k | 7.1k | 99s |
+| **pi-multiedit** | 28 | 9 | **0** | 168k | 7.1k | 98s |
+
+**gpt-6-sol**
+
+| Setup | Tool calls | Edit calls | Shell edits | Tokens in | Tokens out | Time |
+|---|--:|--:|--:|--:|--:|--:|
+| Codex | 42 | 9 | 0 | 805k | 6.8k | 232s |
+| pi built-in | 62 | 26 | 2 | 122k | 5.5k | 200s |
+| pi-hashline-edit | 57 | 24 | 0 | 137k | 4.0k | 150s |
+| **pi-multiedit** | **32** | 8 | **0** | **86k** | **3.7k** | **147s** |
+
+**gpt-6-luna**
+
+| Setup | Tool calls | Edit calls | Shell edits | Tokens in | Tokens out | Time |
+|---|--:|--:|--:|--:|--:|--:|
+| Codex | 28 | 7 | 1 | 689k | 5.5k | 163s |
+| pi built-in | 58 | 23 | 1 | 131k | 4.8k | 151s |
+| pi-hashline-edit | 63 | 20 | 5 | 211k | 6.1k | 199s |
+| **pi-multiedit** | 36 | 11 | **0** | **120k** | **4.1k** | 157s |
+
+Every setup passed all 8 tasks except gpt-6-luna with pi built-in and with pi-hashline-edit (7/8
+each; both failures were Python scripts on the `assertEqual` task). Claude Code and Codex are each
+model's own agent with its native edit tool.
+
+"Shell edits" counts files changed with `sed -i` or Python scripts instead of the edit tool:
 no checks, no feedback, and the way half-applied changes happen. pi-multiedit is the only setup
 with none for every model. GPT models gain the most: with gpt-6-sol it needed about half the tool
 calls of pi's other edit tools and the fewest input and output tokens of all four setups. Claude
