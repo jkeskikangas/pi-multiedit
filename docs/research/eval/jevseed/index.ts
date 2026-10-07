@@ -7,6 +7,7 @@ import { resolve } from "node:path";
 import { promisify } from "node:util";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { formatAnchored } from "../../../../src/hash.ts";
+import { noteShown } from "../../../../src/shown.ts";
 
 const run = promisify(execFile);
 const BUDGET_MS = Number(process.env.PI_JEV_MS ?? 6000);
@@ -68,28 +69,39 @@ export default function (pi: ExtensionAPI): void {
       const texts = new Map<string, string>();
       for (const f of candidates) texts.set(f, await readFile(resolve(cwd, f), "utf8").catch(() => ""));
       const lower = words.map((w) => w.toLowerCase());
-      const classify = async (f: string): Promise<number | undefined> => {
+      // One request per chunk of files: the state carries every file's evidence, one bool question per file.
+      const CHUNK = Number(process.env.PI_JEV_CHUNK ?? 20);
+      const evidence = (f: string) => {
         const lines = texts.get(f)!.split("\n");
-        const declarations = lines.filter((l) => DEF.test(l)).slice(0, 25).map((l) => l.trim().slice(0, 140));
-        const matching = lines.filter((l) => lower.some((w) => l.toLowerCase().includes(w))).slice(0, 8).map((l) => l.trim().slice(0, 160));
-        try {
-          const res: any = await ctx.modelRegistry.classify(model, {
-            state: { task: prompt.slice(0, 2000), file: f, lines: lines.length, declarations, matching_lines: matching },
-            questions: {
-              needed: {
-                type: "bool",
-                instructions: "To implement this task, would the developer need to open this file (to change it, or to see how the thing being changed is defined, called or tested)?",
-                criteria: { true: "Yes, this file must be read or changed for the task", false: "No, it only mentions related names or is unrelated" },
-              },
+        return {
+          lines: lines.length,
+          declarations: lines.filter((l) => DEF.test(l)).slice(0, 20).map((l) => l.trim().slice(0, 120)),
+          matching_lines: lines.filter((l) => lower.some((w) => l.toLowerCase().includes(w))).slice(0, 6).map((l) => l.trim().slice(0, 140)),
+        };
+      };
+      const classifyChunk = async (files: string[]): Promise<(number | undefined)[]> => {
+        const state: Record<string, unknown> = { task: prompt.slice(0, 2000), files: Object.fromEntries(files.map((f, i) => [`f${i}`, { path: f, ...evidence(f) }])) };
+        const questions = Object.fromEntries(
+          files.map((f, i) => [
+            `f${i}`,
+            {
+              type: "bool",
+              instructions: `To implement the task, would the developer need to open file f${i} (${f}) — to change it, or to see how the thing being changed is defined, called or tested?`,
+              criteria: { true: "Yes, this file must be read or changed for the task", false: "No, it only mentions related names or is unrelated" },
             },
-          });
-          return res.stopReason === "stop" ? res.answers?.needed?.probability : undefined;
+          ]),
+        );
+        try {
+          const res: any = await ctx.modelRegistry.classify(model, { state, questions });
+          if (res.stopReason !== "stop") return files.map(() => undefined);
+          return files.map((_, i) => res.answers?.[`f${i}`]?.probability);
         } catch {
-          return undefined;
+          return files.map(() => undefined);
         }
       };
-      const probs: (number | undefined)[] = [];
-      for (let i = 0; i < candidates.length; i += PARALLEL) probs.push(...(await Promise.all(candidates.slice(i, i + PARALLEL).map(classify))));
+      const chunks: string[][] = [];
+      for (let i = 0; i < candidates.length; i += CHUNK) chunks.push(candidates.slice(i, i + CHUNK));
+      const probs = (await Promise.all(chunks.map(classifyChunk))).flat();
       const scored = candidates.map((f, i) => ({ f, p: probs[i] ?? 0 })).sort((a, b) => b.p - a.p);
       const out: string[] = [];
       let used = 0;
@@ -103,6 +115,7 @@ export default function (pi: ExtensionAPI): void {
           out.push(block);
           used += block.length;
           whole.push(f);
+          noteShown(resolve(cwd, f), text); // bare line numbers may now refer to this view
         } else if (p >= 0.3) {
           const hits = lines.map((l, i) => [i, l] as const).filter(([, l]) => lower.some((w) => l.toLowerCase().includes(w))).slice(0, 6);
           const block = `### ${f} (${lines.length} lines, p=${p.toFixed(2)}; matching lines)\n${hits.map(([i, l]) => `${i + 1}: ${l.trim().slice(0, 160)}`).join("\n")}`;

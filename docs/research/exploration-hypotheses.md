@@ -194,6 +194,37 @@ The cheapest next steps are mechanical: accept a bare line number for `to` when 
 (three incidents across the rounds), cut seed latency to ~1.5 s, and add the test file whole when the
 defining file is. Then 4 reps per model on treat to confirm.
 
+### Seed v2: one Jev request per 20 files, plus bare line numbers
+
+Two changes, then 16 treat runs (Opus and Sonnet, 2 reps): the classifier is asked once per chunk of 20
+files (the state carries every file's declarations and matching lines, one bool question per file), and
+the engine accepts a bare line number in `from`/`to` when the file has been shown by `read`, an `edit`
+result or the seed, checking it against that view's line hash (`src/shown.ts`; commit f2ba8d9).
+
+| Model | Arm | Pass | Wall s | Turns | Calls | Edit errors | Seed latency |
+|---|---|--:|--:|--:|--:|--:|--:|
+| opus | baseline | 8/8 | 40 | 9.0 | 8.1 | 0.50 | – |
+| opus | seed v1 (40 requests) | 8/8 | 34 | 6.2 | 5.4 | 0.12 | 3.8 s |
+| opus | seed v2 (2 requests) | 8/8 | 36 | 6.2 | 5.2 | 0.12 | 1.4–1.9 s |
+| sonnet | baseline | 7/8 | 26 | 8.1 | 8.0 | 0.38 | – |
+| sonnet | seed v1 | 6/8 | 36 | 7.0 | 6.5 | 0.38 | 3.8 s |
+| sonnet | seed v2 | 7/8 | 31 | 6.6 | 5.8 | 0.25 | 1.4–1.9 s |
+
+- Batched classification keeps the ranking (e1: module 0.99, its test 0.97, the socket caller 0.61,
+  the rest below 0.52) at under half the latency, and is more selective (3 files whole instead of 7).
+- **e1 is the ceiling case in all four v2 runs: 2 turns, 1 call, 13–17 s** (baseline 5–10 turns,
+  14–42 s). Both models edited from the seed's anchors without a single search or read.
+- **e2 is the floor:** 7–12 turns in every arm. The prompt names the test by concept ("the
+  company-member read policy test"); the identifier extractor does not turn a hyphenated phrase into
+  `company_member_read_policy`, so the seed lacks that file and the model hunts for it. Without e2,
+  Sonnet's v2 wall is 27 s against a 26 s baseline; with it, the two long hunts (47 s, 36 s) make the
+  average 31 s. Mapping hyphenated phrases to snake_case and file-name tokens is the obvious next fix.
+- Against the decision rule (turns −20%, wall −15%, pass not worse, both models): Opus turns −31%,
+  calls −36%, wall −10%; Sonnet turns −19%, calls −28%, wall +19%, pass equal. **Turns and calls pass
+  for both; wall passes for neither**, because Sonnet's turns are short enough that 1.5 s of seed and
+  25–30k extra prefix characters show, and Opus's gain is diluted by e2.
+- No run used a bare line number, so that change had nothing to do here; it costs nothing when unused.
+
 What a third `context`-tool attempt would change, if one is funded: tell the model in the result itself that the
 whole-file sections are complete reads (so it stops re-reading them); give test files whole below a
 size; make `terms` mandatory-by-example in the description; and run Opus with 2 reps to confirm or
