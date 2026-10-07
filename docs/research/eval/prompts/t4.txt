@@ -1,0 +1,1 @@
+In tests/, replace every call `assertEqual(actual, expected)` with `expect(actual).toEqual(expected)`. Leave everything else as it is: other functions (such as assertEqualish), strings, comments and the imports.

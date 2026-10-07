@@ -1,0 +1,1 @@
+In packages/coding-agent, find where DEFAULT_MAX_LINES is defined and every other file under packages/coding-agent/src (excluding tests) that mentions it (imports, re-exports or uses). Create ANSWER.md whose first line is <path of the definition>:<its value>, followed by one line per other file path, paths relative to the repository root. Change nothing else.

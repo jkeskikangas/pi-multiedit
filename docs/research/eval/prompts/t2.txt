@@ -1,0 +1,1 @@
+In this Python project, rename the function `total` to `order_total` everywhere (definition and every call site, including tests), and add a parameter `discount=0` (signature `order_total(items, tax, discount=0)`) that is subtracted from the subtotal before tax is applied.

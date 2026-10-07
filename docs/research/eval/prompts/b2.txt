@@ -1,0 +1,1 @@
+Add a required fourth parameter contextLines: number to computeEditsDiff (pass it on to where the diff is generated), and pass 4 at every existing call site, including tests.

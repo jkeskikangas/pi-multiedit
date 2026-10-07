@@ -1,0 +1,1 @@
+Rename the exported helper isToolCallEventType to isToolCallOfType everywhere in the source code and docs (definition, re-exports, imports, uses, examples), but do not change CHANGELOG.md.

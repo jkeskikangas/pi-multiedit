@@ -1,0 +1,3 @@
+Implement this change in the repository:
+
+fix(coding-agent): share theme across package scopes

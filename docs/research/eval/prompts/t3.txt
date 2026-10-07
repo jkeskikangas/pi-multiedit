@@ -1,0 +1,1 @@
+In src/flags.ts add `rollout: number` to the Flag type and `rollout: 0` to every flag, and delete the legacy block from the `// BEGIN legacy` line through the `// END legacy` line. In docs/flags.md add a `rollout` column (last) with value 0 for every flag, and remove the sentence about legacyEnabled.

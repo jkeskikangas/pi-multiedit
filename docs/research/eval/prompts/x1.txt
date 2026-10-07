@@ -1,0 +1,1 @@
+The edit tool's diff preview shows a few unchanged lines around each change. Reduce that default to 2 lines. Change nothing else.

@@ -1,0 +1,5 @@
+Implement this change in the repository:
+
+fix(tui): disable inline images in cmux
+
+Treat CMUX_WORKSPACE_ID like tmux/screen for terminal capabilities and document the issue link.
