@@ -28,7 +28,9 @@ const INTENT_TOP = 8;
 const LARGE_LINES = 400;
 const SHOWN_PARTS = 3;
 /** Matching lines one search shows; a wider search would flood the context. */
-const SEARCH_MAX_MATCHES = 50;
+const COMPACT = process.env.PI_MULTIEDIT_COMPACT === "1"; // under evaluation: tighter search defaults
+const SEARCH_MAX_MATCHES = COMPACT ? 20 : 50;
+const SEARCH_MAX_PER_FILE = COMPACT ? 5 : Infinity;
 
 export type ReadFs = {
   /** File text, null if absent; throws for directories, binary and non-UTF-8 files. */
@@ -282,7 +284,7 @@ export class Reader {
     } catch (e) {
       throw new Error(`invalid regex: ${(e as Error).message}`);
     }
-    const context = item.context ?? 2;
+    const context = item.context ?? (COMPACT ? 0 : 2);
     const blocks: string[] = [];
     let matches = 0;
     let shownMatches = 0;
@@ -304,7 +306,7 @@ export class Reader {
       if (all.length === 0) continue;
       matches += all.length;
       hitFiles++;
-      const hits = all.slice(0, Math.max(0, SEARCH_MAX_MATCHES - shownMatches));
+      const hits = all.slice(0, Math.min(SEARCH_MAX_PER_FILE, Math.max(0, SEARCH_MAX_MATCHES - shownMatches)));
       if (this.budget.full || hits.length === 0) continue;
       shownMatches += hits.length;
       const wanted = new Set<number>();
