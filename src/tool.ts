@@ -207,6 +207,7 @@ export async function applyEdits(cwd: string, params: Params, fs: PlanFs, signal
     let drifted: Awaited<ReturnType<typeof drift>>;
     try {
       drifted = await serially(async () => {
+        signal?.throwIfAborted(); // the call may have been aborted while queued
         await commit(changes);
         return drift(changes);
       });

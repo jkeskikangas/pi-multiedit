@@ -225,8 +225,8 @@ the few milliseconds each takes, so neither can drop the other's change. Each fi
 more just before its own write, written to a temporary file and renamed into place; if a write
 fails, the files already written are put back, unless something else has changed them since.
 Finally every file is read back and compared with what was intended. One limit remains: another
-program writing a file in the microseconds between that last check and the rename is overwritten
-without notice. Filesystems offer no way to replace a file only if it is unchanged.
+program writing a file in the brief window between that last check and the rename (while the
+temporary file is written) is overwritten without notice. Filesystems offer no way to replace a file only if it is unchanged.
 
 ## Requirements
 
