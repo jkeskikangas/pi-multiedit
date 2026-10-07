@@ -160,3 +160,29 @@ test("the schema takes reads only", async () => {
   assert.ok(!Value.Check(schema, { path: "a.ts" }), "the old single-path shape");
   assert.ok(!Value.Check(schema, { reads: [{ path: "a.ts", lines: "1-3" }] }), "unknown field");
 });
+
+test("intent: ranks the files a task is about, with anchored declarations and hit lines", async () => {
+  const { read } = instance();
+  await writeFile(join(dir, "src/diff.ts"), "export function renderDiff(text: string, contextLines = 4) {\n  return text;\n}\n");
+  execFileSync("git", ["add", "-A"], { cwd: dir });
+  const out = await read({ reads: [{ glob: "src/**/*.ts", intent: "reduce the context lines shown around each change in the diff" }] });
+  assert.match(out, /^intent "reduce the context lines/m);
+  const first = out.split("\n").find((l) => /^src\//.test(l));
+  assert.equal(first, "src/diff.ts", out);
+  assert.match(out, /1#[A-Z]{2}:export function renderDiff\(text: string, contextLines = 4\)/);
+});
+
+test("intent: a re-ranker reorders the candidates and the result says so", async () => {
+  const { Reader, ReadCache } = await import("../src/reader.ts");
+  const { listFiles, readText } = await import("../src/fs.ts");
+  const reverse = async (_intent: string, ranked: { path: string }[]) => [...ranked].reverse();
+  const out = await new Reader(dir, { read: readText, list: listFiles }, new ReadCache(), reverse as never).run([
+    { glob: "src/**/*.ts", intent: "repo find rows" },
+  ]);
+  assert.match(out, /re-ranked/);
+});
+
+test("intent needs a scope and no other selector", async () => {
+  const { read } = instance();
+  await assert.rejects(read({ reads: [{ path: "src/repo.ts", intent: "x", search: "y" }] }), /at most one of search, outline, intent/);
+});

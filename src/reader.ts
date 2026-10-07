@@ -3,6 +3,7 @@
 import { createHash } from "node:crypto";
 import { extname, matchesGlob, resolve } from "node:path";
 import { formatAnchored } from "./hash.ts";
+import { locate, termsOf, type Located } from "./locate.ts";
 import { outlineLines } from "./outline.ts";
 import { splitLines } from "./text.ts";
 
@@ -15,7 +16,14 @@ export type ReadItem = {
   flags?: string;
   context?: number;
   outline?: boolean;
+  /** A task description: rank the scope's files by how likely the task involves them. */
+  intent?: string;
 };
+
+/** Reorders located files (e.g. by a classifier); returns them unchanged when it cannot help. */
+export type Reranker = (intent: string, ranked: Located[]) => Promise<Located[]>;
+
+const INTENT_TOP = 8;
 
 export type ReadFs = {
   /** File text, null if absent; throws for directories, binary and non-UTF-8 files. */
@@ -84,6 +92,7 @@ const hashOf = (text: string) => createHash("sha1").update(text).digest("hex");
 function describe(item: ReadItem): string {
   const scope = item.path ?? item.glob ?? "?";
   if (item.search !== undefined) return `${scope} search ${JSON.stringify(item.search)}`;
+  if (item.intent !== undefined) return `${scope} intent ${JSON.stringify(item.intent.slice(0, 60))}`;
   if (item.outline) return `${scope} outline`;
   if (item.offset !== undefined || item.limit !== undefined) return `${scope} offset=${item.offset ?? 1}`;
   return scope;
@@ -94,9 +103,9 @@ export function validate(items: ReadItem[]): string[] {
   items.forEach((it, i) => {
     const at = `read ${i + 1}`;
     if ((it.path === undefined) === (it.glob === undefined)) problems.push(`${at}: give path or glob`);
-    if (it.search !== undefined && it.outline) problems.push(`${at}: give at most one of search, outline`);
-    if ((it.offset !== undefined || it.limit !== undefined) && (it.path === undefined || it.search !== undefined || it.outline)) {
-      problems.push(`${at}: offset/limit need path and no search or outline`);
+    if ([it.search !== undefined, it.outline === true, it.intent !== undefined].filter(Boolean).length > 1) problems.push(`${at}: give at most one of search, outline, intent`);
+    if ((it.offset !== undefined || it.limit !== undefined) && (it.path === undefined || it.search !== undefined || it.outline || it.intent !== undefined)) {
+      problems.push(`${at}: offset/limit need path and no search, outline or intent`);
     }
     if (it.context !== undefined && it.search === undefined) problems.push(`${at}: context needs search`);
     if (it.flags !== undefined && it.search === undefined) problems.push(`${at}: flags needs search`);
@@ -113,11 +122,13 @@ export class Reader {
   readonly cwd: string;
   readonly fs: ReadFs;
   readonly cache: ReadCache;
+  readonly rerank?: Reranker;
 
-  constructor(cwd: string, fs: ReadFs, cache: ReadCache) {
+  constructor(cwd: string, fs: ReadFs, cache: ReadCache, rerank?: Reranker) {
     this.cwd = cwd;
     this.fs = fs;
     this.cache = cache;
+    this.rerank = rerank;
   }
 
   private abs(path: string): string {
@@ -164,7 +175,8 @@ export class Reader {
         break;
       }
       try {
-        if (item.search !== undefined) await this.search(item);
+        if (item.intent !== undefined) await this.intent(item);
+        else if (item.search !== undefined) await this.search(item);
         else if (item.outline) await this.outline(item);
         else if (item.glob !== undefined) await this.list(item.glob);
         else await this.file(item);
@@ -264,6 +276,39 @@ export class Reader {
     const head = `search ${JSON.stringify(item.search)} in ${scope}: ${matches} match${matches === 1 ? "" : "es"} in ${hitFiles} file${hitFiles === 1 ? "" : "s"}`;
     const cut = this.budget.full ? ["… output budget reached; narrow the search (a path, a tighter glob or pattern, or context: 0)"] : [];
     this.out.push([head, ...blocks, ...cut].join("\n\n"));
+  }
+
+  private async intent(item: ReadItem): Promise<void> {
+    const files = item.path !== undefined ? [item.path] : await this.files(item.glob!);
+    if (files.length === 0) throw new Error(`glob ${item.glob} matched no files`);
+    let ranked = await locate(this.cwd, item.intent!, { files });
+    const before = ranked.map((r) => r.path).join("\n");
+    if (this.rerank && ranked.length > 1) ranked = await this.rerank(item.intent!, ranked);
+    const reranked = ranked.map((r) => r.path).join("\n") !== before;
+    const terms = termsOf(item.intent!).map((t) => t.toLowerCase());
+    const top = ranked.slice(0, INTENT_TOP);
+    const blocks: string[] = [];
+    for (const r of top) {
+      const text = await this.text(r.path).catch(() => null);
+      if (text === null) continue;
+      const lines = splitLines(text);
+      // Evidence: the declarations that matched, then lines with the rarest terms.
+      const evidence = new Set(r.declarations.slice(0, 3));
+      for (const t of (r.terms.length ? r.terms : terms).map((x) => x.toLowerCase())) {
+        if (evidence.size >= 6) break;
+        const k = lines.findIndex((l, i) => !evidence.has(i + 1) && l.toLowerCase().includes(t));
+        if (k >= 0) evidence.add(k + 1);
+      }
+      const rows = this.rows(this.abs(r.path), lines, [...evidence].sort((a, b) => a - b));
+      const taken = this.budget.take([`${r.path}${r.reference ? " (uses a declaration above)" : ""}`, ...rows]);
+      if (taken.length) blocks.push(taken.join("\n"));
+      if (this.budget.full) break;
+    }
+    const rest = ranked.slice(INTENT_TOP).map((r) => r.path);
+    const scope = item.path ?? item.glob;
+    const head = `intent ${JSON.stringify(item.intent!.slice(0, 80))} in ${scope}: ${ranked.length} candidate file${ranked.length === 1 ? "" : "s"}, best first${reranked ? " (re-ranked by a classifier)" : ""}`;
+    const tail = rest.length ? [`also mention these terms (${rest.length}): ${rest.slice(0, 15).join(", ")}${rest.length > 15 ? ", …" : ""}`] : [];
+    this.out.push([head, ...blocks, ...tail].join("\n\n"));
   }
 
   private async outline(item: ReadItem): Promise<void> {
