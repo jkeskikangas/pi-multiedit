@@ -149,7 +149,52 @@ line). Sonnet 2 reps, Opus 1 rep per attempt.
   conclusion again. The pack adds 14–30k chars to the first turn and does not remove the model's own
   reads.
 
-What a third attempt would change, if one is funded: tell the model in the result itself that the
+## H1 variant with Jev: seed the whole files at turn 0
+
+The adoption problem disappears if nothing has to be called. `eval/jevseed/index.ts` (`before_agent_start`):
+identifiers and quoted strings from the prompt → `rg -l` candidates (≤40 files) → TypeSafe Jev
+classifies each ("would the developer need to open this file?", 8 in parallel, file declarations and
+matching lines as evidence) → files with p ≥ 0.6 and ≤ 400 lines are injected **whole and anchored,
+labelled "complete, already read"**, p ≥ 0.3 as matching lines, 40k-char cap, 6 s budget (no seed on
+timeout or when the prompt names nothing). Run on treat e1–e4 and pi x1–x4, b1–b2, Opus and Sonnet
+at low effort, 2 reps (40 runs), against the pi-multiedit baselines.
+
+| Repo | Model | Arm | Pass | Wall s | Turns | Calls | Edit errors | Seed ms | Files whole | Seed chars |
+|---|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| treat | opus | baseline | 8/8 | 40 | 9.0 | 8.1 | 0.50 | – | – | – |
+| treat | opus | jev seed | 8/8 | 34 | 6.2 | 5.4 | 0.12 | 3,776 | 3.6 | 30k |
+| treat | sonnet | baseline | 7/8 | 26 | 8.1 | 8.0 | 0.38 | – | – | – |
+| treat | sonnet | jev seed | 6/8 | 36 | 7.0 | 6.5 | 0.38 | 3,786 | 3.5 | 30k |
+| pi | opus | baseline | 8/8 | 15 | 3.5 | 2.5 | 0.00 | – | – | – |
+| pi | opus | jev seed | 12/12 | 15 | 3.4 | 2.7 | 0.00 | 830 | 2.8 | 26k |
+| pi | sonnet | baseline | 8/8 | 16 | 3.6 | 2.9 | 0.00 | – | – | – |
+| pi | sonnet | jev seed | 11/12 | 15 | 3.8 | 3.1 | 0.08 | 791 | 2.5 | 26k |
+
+- **Opus on treat meets the decision rule:** turns −31%, calls −33%, wall −15% (with 3.8 s of seed
+  latency inside it), pass 8/8, edit errors 0.50 → 0.12. Two runs (e1 for both models) went straight
+  to a correct `edit` with `from`/`to` anchors from the seed: 2 turns, 1 call.
+- **Sonnet on treat does not:** turns −14%, wall +38%, pass 6/8. The wall figure is one run (e1 r1:
+  62 s, 11 turns): three refused edit calls, a missing `new` and twice a bare line number for `to`
+  (`"43"`, `"42"`) while the seed showed the anchors; the other two failures are Sonnet's own task
+  omissions seen in the baseline too (e3 rules test, e4 `doctor_specialty`). Without the outlier
+  Sonnet's wall is 32 s, still above baseline because of the seed's 3.8 s and 30k extra prefix chars.
+- **pi tasks are at their floor** (3–4 turns: search, edit, answer); the seed changes nothing there and
+  costs 0.8 s. Jev picked the right files (Opus 12/12 pass).
+- **The seed is trusted less than it could be:** only 2 of 16 treat runs edited first; the rest still
+  searched and read, mostly the test file and concept words ("revoke", "read policy") that the seed
+  cannot derive from identifiers. The 2-turn runs show the ceiling.
+- Jev quality on treat: top file p = 0.99 for the defining module on e1, tests ranked next; no run
+  seeded a wrong file whole. Latency is 40 classifications at 8 in parallel; 20 candidates at 16
+  parallel would be ~1.5 s.
+
+**Reading.** Content at turn 0, selected by a classifier that knows the task, is the first exploration
+lever in two rounds that moved Opus by more than 20% on a real repository with pass rate intact. It is
+not yet a Sonnet win, and the remaining cost is the model's habit of re-verifying what it was given.
+The cheapest next steps are mechanical: accept a bare line number for `to` when `from` is an anchor
+(three incidents across the rounds), cut seed latency to ~1.5 s, and add the test file whole when the
+defining file is. Then 4 reps per model on treat to confirm.
+
+What a third `context`-tool attempt would change, if one is funded: tell the model in the result itself that the
 whole-file sections are complete reads (so it stops re-reading them); give test files whole below a
 size; make `terms` mandatory-by-example in the description; and run Opus with 2 reps to confirm or
 dissolve the −28%. The honest expectation from two attempts and round 1 is that Sonnet will keep its
