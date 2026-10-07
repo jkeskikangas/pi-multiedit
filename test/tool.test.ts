@@ -9,7 +9,7 @@ import { registerEditTool } from "../src/tool.ts";
 
 type Registered = { name: string; description?: string; execute: Function };
 const tools = new Map<string, Registered>();
-const pi = { registerTool: (t: Registered) => tools.set(t.name, t) };
+const pi = { registerTool: (t: Registered) => tools.set(t.name, t), on: () => {} };
 registerEditTool(pi as never);
 registerReadTool(pi as never);
 
@@ -42,7 +42,7 @@ test("failure is an error result listing every failure, and nothing is written",
 
 test("read tags lines with anchors that edit accepts", async () => {
   await writeFile(join(dir, "r.txt"), "first\nsecond\n");
-  const r = await tools.get("read")!.execute("id", { path: "r.txt" }, undefined, undefined, { cwd: dir });
+  const r = await tools.get("read")!.execute("id", { reads: [{ path: "r.txt" }] }, undefined, undefined, { cwd: dir });
   const anchor = /^(\d+#[A-Z]{2}):second$/m.exec(text(r))![1];
   await run({ path: "r.txt", edits: [{ from: anchor, new: "SECOND" }] });
   assert.equal(await readFile(join(dir, "r.txt"), "utf8"), "first\nSECOND\n");
@@ -50,9 +50,11 @@ test("read tags lines with anchors that edit accepts", async () => {
 
 test("read pages long files and says where to continue", async () => {
   await writeFile(join(dir, "long.txt"), Array.from({ length: 30 }, (_, i) => `l${i + 1}`).join("\n") + "\n");
-  const r = await tools.get("read")!.execute("id", { path: "long.txt", offset: 10, limit: 5 }, undefined, undefined, { cwd: dir });
+  const r = await tools.get("read")!.execute("id", { reads: [{ path: "long.txt", offset: 10, limit: 5 }] }, undefined, undefined, { cwd: dir });
   assert.match(text(r), /^10#[A-Z]{2}:l10$/m);
-  assert.match(text(r), /Lines 10-14 of 30\. Continue with offset=15/);
+  assert.match(text(r), /long\.txt \(lines 10-14 of 30\)/);
+  assert.match(text(r), /^14#[A-Z]{2}:l14$/m);
+  assert.ok(!text(r).includes("l15"), "the limit is honoured");
 });
 
 test("an edit that introduces a parse error is refused with the broken lines, and nothing is written", async () => {

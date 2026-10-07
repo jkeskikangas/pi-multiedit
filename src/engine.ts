@@ -170,7 +170,14 @@ export class Planner {
       const hits = all.filter((p) => matchesGlob(p, e.glob!)).map((p) => this.abs(p));
       const live: string[] = [];
       for (const abs of hits) {
-        const st = await this.state(abs);
+        let st: FileState;
+        try {
+          st = await this.state(abs);
+        } catch (e) {
+          // A glob also matches images and other undecodable files; text edits cannot apply there.
+          if (/is binary|not valid UTF-8/.test((e as Error).message)) continue;
+          throw e;
+        }
         if (st.cur !== null && !live.includes(st.abs)) live.push(st.abs);
       }
       if (live.length === 0) throw new EditError(`glob ${e.glob} matched no files`);

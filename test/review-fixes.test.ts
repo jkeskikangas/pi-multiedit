@@ -1,7 +1,7 @@
 // Regression tests for the independent review's findings (symlinks, encodings, modes, rollback).
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmod, mkdtemp, readFile, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -79,3 +79,13 @@ test("old text missing while new text exists elsewhere is a failure with a hint,
 
 
 
+
+test("a glob edit skips binary and non-UTF-8 files instead of failing; an explicit path still refuses", async () => {
+  await mkdir(join(dir, "mixed"), { recursive: true });
+  await writeFile(join(dir, "mixed/a.md"), "old name\n");
+  await writeFile(join(dir, "mixed/logo.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1, 2]));
+  await writeFile(join(dir, "mixed/latin1.txt"), Buffer.from([0x6f, 0x6c, 0x64, 0xe9, 0x0a]));
+  await run({ edits: [{ glob: "mixed/**", old: "old name", new: "new name" }] });
+  assert.equal(await readFile(join(dir, "mixed/a.md"), "utf8"), "new name\n");
+  await assert.rejects(run({ edits: [{ path: "mixed/logo.png", old: "x", new: "y" }] }), /binary/);
+});

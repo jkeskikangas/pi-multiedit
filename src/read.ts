@@ -1,62 +1,65 @@
-// `read` with LINE#HASH anchors on every text line (same format as pi-hashline-edit). Images and
-// other non-text files go to pi's built-in read.
-import { readFile, stat } from "node:fs/promises";
+// `read`: many reads in one call. Each read is a scope (path or glob) and at most one selector
+// (a line range, a search or an outline); every text line carries an N#HH anchor for edit.
 import { extname, resolve } from "node:path";
-import {
-  createReadToolDefinition,
-  DEFAULT_MAX_BYTES,
-  DEFAULT_MAX_LINES,
-  formatSize,
-  type ExtensionAPI,
-} from "@earendil-works/pi-coding-agent";
+import { createReadToolDefinition, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { formatAnchored } from "./hash.ts";
-import { splitLines } from "./text.ts";
+import { listFiles, readText } from "./fs.ts";
+import { MAX_BYTES, MAX_LINES, ReadCache, Reader, validate, type ReadItem } from "./reader.ts";
 
 const IMAGE = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 
-const schema = Type.Object(
+const readItem = Type.Object(
   {
-    path: Type.String(),
-    offset: Type.Optional(Type.Integer({ minimum: 1, description: "first line, 1-based" })),
+    path: Type.Optional(Type.String()),
+    glob: Type.Optional(Type.String()),
+    offset: Type.Optional(Type.Integer({ minimum: 1 })),
     limit: Type.Optional(Type.Integer({ minimum: 1 })),
+    search: Type.Optional(Type.String()),
+    flags: Type.Optional(Type.String()),
+    context: Type.Optional(Type.Integer({ minimum: 0 })),
+    outline: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },
 );
 
+const schema = Type.Object({ reads: Type.Array(readItem, { minItems: 1 }) }, { additionalProperties: false });
+
+const DESCRIPTION = `Read and search files: many reads in one call. Each read: a scope (path, or glob over git-visible files) and at most one selector.
+- none: a path returns the whole file; a glob lists the matching files.
+- offset/limit (path only): a line range.
+- search (+ context, flags): JS regex, line by line, over the path or every file in the glob; matching lines come back with context lines around them (default 2).
+- outline: the declarations and headings of the path or of every file in the glob (TypeScript, JavaScript, Python, Markdown; other languages with their grammar).
+Lines come back as N#HH:content; pass the anchors to edit (from/to) without reading again.
+A re-read of unchanged lines returns a short "unchanged" note; read it again if you need the text itself.
+Output is capped at ${MAX_LINES} lines or ${MAX_BYTES / 1024}KB per call; the result says what was left out and how to get it.
+Use one read call instead of cat, sed, head, grep, rg or find in bash.
+
+Example:
+{"reads": [{"glob": "src/**/*.ts", "search": "findOrThrow\\\\("}, {"path": "src/repo.ts", "outline": true}, {"path": "src/users.ts", "offset": 1, "limit": 40}]}`;
+
 export function registerReadTool(pi: ExtensionAPI): void {
+  const cache = new ReadCache();
+  // The model loses earlier reads on compaction, and tree navigation changes what it has seen.
+  const reset = async () => cache.reset();
+  pi.on("session_start", reset);
+  pi.on("session_compact", reset);
+  pi.on("session_tree", reset);
   pi.registerTool({
     name: "read",
     label: "read",
-    description: `Read a file. Lines come back as N#HH:content; use the anchors in edit (from/to). Page with offset/limit (cap ${DEFAULT_MAX_LINES} lines or ${formatSize(DEFAULT_MAX_BYTES)}). Images come back as attachments.`,
-    promptSnippet: "Read files; text lines carry LINE#HASH anchors for edit",
+    description: DESCRIPTION,
+    promptSnippet: "Read files, search them and outline them, many at once; lines carry anchors for edit",
     parameters: schema,
-    async execute(id, params, signal, onUpdate, ctx) {
-      const abs = resolve(ctx.cwd, params.path.replace(/^@/, "").replace(/^~(?=\/|$)/, process.env.HOME ?? "~"));
-      const info = await stat(abs);
-      if (info.isDirectory()) throw new Error(`${params.path} is a directory; use ls or find`);
-      const buf = await readFile(abs);
-      if (IMAGE.has(extname(abs).toLowerCase()) || buf.subarray(0, 8192).includes(0)) {
-        return createReadToolDefinition(ctx.cwd).execute(id, params, signal, onUpdate, ctx);
+    async execute(id, params: { reads: ReadItem[] }, signal, onUpdate, ctx) {
+      const problems = validate(params.reads);
+      if (problems.length) throw new Error(problems.join("\n"));
+      const only = params.reads.length === 1 ? params.reads[0] : undefined;
+      if (only?.path !== undefined && IMAGE.has(extname(only.path).toLowerCase()) && only.search === undefined && !only.outline) {
+        // Images go to pi's built-in read, which returns them as attachments.
+        return createReadToolDefinition(ctx.cwd).execute(id, { path: resolve(ctx.cwd, only.path) }, signal, onUpdate, ctx);
       }
-      let text = buf.toString("utf8");
-      if (text.startsWith("\uFEFF")) text = text.slice(1);
-      const lines = splitLines(text.replace(/\r\n/g, "\n"));
-      if (lines.length === 0) return { content: [{ type: "text", text: "(empty file; create content with edit files[].write)" }], details: undefined };
-      const first = params.offset ?? 1;
-      if (first > lines.length) throw new Error(`offset ${first} is past the end (${lines.length} lines)`);
-      const last = Math.min(lines.length, first - 1 + (params.limit ?? DEFAULT_MAX_LINES), first - 1 + DEFAULT_MAX_LINES);
-      const picked: string[] = [];
-      let bytes = 0;
-      for (let n = first; n <= last; n++) {
-        bytes += Buffer.byteLength(lines[n - 1]) + 10;
-        if (bytes > DEFAULT_MAX_BYTES && picked.length > 0) break;
-        picked.push(lines[n - 1]);
-      }
-      let out = formatAnchored(picked, first);
-      const end = first + picked.length - 1;
-      if (end < lines.length) out += `\n\n[Lines ${first}-${end} of ${lines.length}. Continue with offset=${end + 1}.]`;
-      return { content: [{ type: "text", text: out }], details: undefined };
+      const text = await new Reader(ctx.cwd, { read: readText, list: listFiles }, cache).run(params.reads);
+      return { content: [{ type: "text", text }], details: undefined };
     },
   });
 }

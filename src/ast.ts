@@ -72,26 +72,34 @@ export function resolveLang(path: string): string {
   return name;
 }
 
-type TreeNode = {
+export type TreeNode = {
   kind(): string;
+  text(): string;
   isLeaf(): boolean;
   children(): TreeNode[];
   range(): { start: { line: number; index: number }; end: { index: number } };
 };
 
-/**
- * 1-based lines of tree-sitter ERROR nodes and MISSING tokens (zero-width leaves the parser
- * inserted to recover, e.g. an unclosed paren), or undefined when no grammar is available.
- */
-export function syntaxErrorLines(path: string, text: string): number[] | undefined {
+/** The parse tree of `text`, or undefined when no grammar is available for the file's extension. */
+export function parseRoot(path: string, text: string): TreeNode | undefined {
   let grammar: string;
   try {
     grammar = resolveLang(path);
   } catch {
     return undefined;
   }
+  return load().parse(grammar, text).root() as unknown as TreeNode;
+}
+
+/**
+ * 1-based lines of tree-sitter ERROR nodes and MISSING tokens (zero-width leaves the parser
+ * inserted to recover, e.g. an unclosed paren), or undefined when no grammar is available.
+ */
+export function syntaxErrorLines(path: string, text: string): number[] | undefined {
+  const root = parseRoot(path, text);
+  if (!root) return undefined;
   const lines = new Set<number>();
-  const stack = [load().parse(grammar, text).root() as unknown as TreeNode];
+  const stack = [root];
   while (stack.length) {
     const node = stack.pop()!;
     const { start, end } = node.range();
