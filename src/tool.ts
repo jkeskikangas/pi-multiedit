@@ -63,8 +63,8 @@ Selectors:
 - regex (+ flags): JS regex; new may use $1, $<name>, $&.
 - ast: ast-grep pattern; reuse $X / $$$X in new.
 - json: JSON pointer; segments are keys, indexes, - (append) or [key=value]. new is the JSON value itself, e.g. "unit", 3, {"path": "a"}.
-- none: the whole file (path only): new creates or overwrites it, before/after prepends/appends, delete deletes it.
-action: replace (default), before, after, delete (default without new). On line ranges new is whole lines; new: "" removes them.
+- none: the whole file (path only, no count): new creates or overwrites it; before/after prepend/append new as raw text (include the newlines) to an existing file; action "delete" deletes it.
+action: replace (default), before, after, delete. Every action except delete needs new; deleting is always explicit. On line ranges new is whole lines; new: "" removes them.
 count: expected matches across the scope: 1 (default), a number, or "all".
 Edits run in order; anchors refer to the file as last read and are mapped through earlier edits.
 An edit that introduces a parse error is refused (existing errors don't count); allowSyntaxErrors only if the parser is wrong.

@@ -59,14 +59,14 @@ function dynamicLanguages(): Set<string> {
   return registered;
 }
 
-export function resolveLang(path: string, lang?: string): string {
-  const key = (lang ?? extname(path).slice(1)).toLowerCase();
+export function resolveLang(path: string): string {
+  const key = extname(path).slice(1).toLowerCase();
   const builtin = BUILTIN[key] ?? Object.values(BUILTIN).find((v) => v.toLowerCase() === key);
   if (builtin) return builtin;
   const name = DYNAMIC[key] ?? key;
   if (name === "html") return "Html";
   if (!dynamicLanguages().has(name)) {
-    throw new Error(`no ast-grep grammar for "${key}" (${path}); install @ast-grep/lang-${name} next to pi-multiedit or pass lang`);
+    throw new Error(`no ast-grep grammar for "${key}" (${path}); install @ast-grep/lang-${name} next to pi-multiedit`);
   }
   return name;
 }
@@ -106,8 +106,8 @@ export function syntaxErrorLines(path: string, text: string): number[] | undefin
 const META = /\$\$\$([A-Z_][A-Z0-9_]*)|\$([A-Z_][A-Z0-9_]*)/g;
 
 /** Matches of `pattern`, outermost only, each with `template` expanded from its metavariables. */
-export function astFind(path: string, text: string, pattern: string, template: string, lang?: string): Span[] {
-  const grammar = resolveLang(path, lang);
+export function astFind(path: string, text: string, pattern: string, template: string): Span[] {
+  const grammar = resolveLang(path);
   const root = load().parse(grammar, text).root();
   const spans: Span[] = [];
   for (const node of root.findAll(pattern)) {

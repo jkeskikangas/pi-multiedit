@@ -153,7 +153,6 @@ export class Planner {
     }
     const st = await this.state(abs);
     if (action === "replace") {
-      if (e.new!.split("\n").some((l) => ANCHOR_PREFIX_RE.test(l))) throw new EditError(`${e.path}: new contains N#HH: prefixes; send literal content`);
       st.cur = e.new!;
       st.rewrittenBy = this.editNo;
       return;
@@ -167,7 +166,7 @@ export class Planner {
     if (e.glob !== undefined && e.path !== undefined) throw new EditError("give path or glob, not both");
     if (e.glob !== undefined) {
       this.listing ??= await this.fs.list(this.cwd);
-      // Files created or moved earlier in this call are in scope too.
+      // Files created earlier in this call are in scope too.
       const pending = [...this.files.values()].filter((s) => s.cur !== null).map((s) => this.rel(s.abs));
       const all = [...new Set([...this.listing, ...pending])];
       const hits = all.filter((p) => matchesGlob(p, e.glob!)).map((p) => this.abs(p));
@@ -188,8 +187,9 @@ export class Planner {
       throw new EditError("new must be a string; only json takes a JSON value");
     }
     const e: TextEdit = { ...raw, new: raw.json === undefined ? (raw.new as string | undefined) : undefined };
-    const action: Action = raw.action ?? (raw.new === undefined ? "delete" : "replace");
-    if (action !== "delete" && raw.new === undefined) throw new EditError(`action ${action} needs new`);
+    // No implicit delete: a truncated or selector-less edit must never remove text or a file.
+    const action: Action = raw.action ?? "replace";
+    if (action !== "delete" && raw.new === undefined) throw new EditError(`${action} needs new, or action: "delete"`);
     if (e.new !== undefined) {
       e.new = norm(e.new);
       if (e.new.split("\n").some((l) => ANCHOR_PREFIX_RE.test(l))) {
@@ -199,6 +199,8 @@ export class Planner {
     if (e.old !== undefined) e.old = norm(e.old);
     const selectors = (["old", "regex", "ast", "from", "json"] as const).filter((k) => e[k] !== undefined);
     if (selectors.length > 1) throw new EditError(`give at most one selector (old, from[+to], regex, ast, json); got ${selectors.join(", ")}`);
+    if (e.path !== undefined && e.glob !== undefined) throw new EditError("give path or glob, not both");
+    if (e.flags !== undefined && e.regex === undefined) throw new EditError("flags needs regex");
     if (e.to !== undefined && e.from === undefined) throw new EditError("to needs from");
     if (selectors.length === 0) return this.wholeFile(e, action);
 
@@ -253,7 +255,7 @@ export class Planner {
 
   private async live(abs: string): Promise<FileState> {
     const st = await this.state(abs);
-    if (st.cur === null) throw new EditError(`${this.rel(abs)}: does not exist${st.orig !== null ? " (deleted or moved earlier in this call)" : ""}`, undefined, this.rel(abs));
+    if (st.cur === null) throw new EditError(`${this.rel(abs)}: does not exist${st.orig !== null ? " (deleted earlier in this call)" : ""}`, undefined, this.rel(abs));
     return st;
   }
 

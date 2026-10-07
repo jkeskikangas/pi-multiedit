@@ -342,6 +342,31 @@ describe("whole-file edits (no selector)", () => {
     assert.equal(await read("n.txt"), "two\n");
   });
 
+  test("a bare {path} or a selector without new is an error, never a delete", async () => {
+    const dir = await setup({ "a.txt": "keep\n" });
+    const { plan, read } = await apply(dir, { edits: [{ path: "a.txt" }, { path: "a.txt", old: "keep" }] });
+    assert.match(plan.failures[0].message, /needs new, or action: "delete"/);
+    assert.match(plan.failures[1].message, /needs new, or action: "delete"/);
+    assert.equal(await read("a.txt"), "keep\n");
+  });
+
+  test("a modifier without its selector, or path with glob, is refused instead of becoming a whole-file edit", async () => {
+    const dir = await setup({ "a.ts": "x\n" });
+    const { plan, read } = await apply(dir, {
+      edits: [
+        { path: "a.ts", flags: "g", new: "z" },
+        { path: "a.ts", glob: "*.ts", action: "delete" },
+        { path: "a.ts", count: 2, new: "z" },
+        { path: "a.ts", to: "1#ZZ", new: "z" },
+      ],
+    });
+    assert.deepEqual(
+      plan.failures.map((f) => f.message),
+      ["flags needs regex", "give path or glob, not both", "count needs a selector", "to needs from"],
+    );
+    assert.equal(await read("a.ts"), "x\n");
+  });
+
   test("whole-file edits need a path, not a glob, and delete needs an existing file", async () => {
     const dir = await setup({ "a.txt": "a\n" });
     const { plan } = await apply(dir, { edits: [{ glob: "*.txt", action: "delete" }, { path: "missing.txt", action: "delete" }] });

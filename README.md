@@ -58,12 +58,13 @@ Each edit has a **scope**, at most one **selector**, and optionally an **action*
 |---|---|
 | scope | `path`, or `glob` over git-visible files (e.g. `lib/**/*.ex`) |
 | selector | `old`: exact text · `from` + `to`: whole lines between two anchors, inclusive (an end may also be exact text) · `regex` (+ `flags`), where `new` may use `$1` and `$<name>` · `ast`: an ast-grep pattern whose `$X` and `$$$X` can be reused in `new` · `json`: a pointer whose segments may be `[key=value]` or `-` (append) · none: the whole file (`path` only) |
-| action | `replace` (default), `before`, `after`, `delete` (the default when `new` is omitted) |
+| action | `replace` (default), `before`, `after`, `delete`. Every action except `delete` needs `new`; deleting is always explicit |
 | count | how many matches are expected across the scope: `1` (default), a number, or `"all"` |
 
 `new` is text for every selector except `json`, where it is the JSON value itself (`"integration"`,
 `3`, `{"path": "a"}`). The action composes with every selector the same way. On the whole file,
-`replace` creates or overwrites it, `before`/`after` prepend or append, and `delete` removes it.
+`replace` creates or overwrites it, `before`/`after` prepend or append raw text to an existing
+file, and `delete` removes it.
 
 A single call that changes code, creates a file, updates a JSON registry and every matching call
 site:
