@@ -131,25 +131,29 @@ the match is unique, and the result says when it happened.
 
 ## How it compares
 
-A small synthetic eval in pi, run on gpt-6-luna and claude-sonnet-5-5 at low thinking: 3 tasks,
-each repeated twice per tool. The tasks were a multi-file Elixir change with a JSON registry and
-docs, a Python rename that adds a parameter, and a TypeScript config and docs change.
+A small synthetic eval at low thinking: 4 tasks, each run twice per setup. The tasks: a multi-file
+Elixir change with a JSON registry and docs; a Python rename that adds a parameter; a TypeScript
+config and docs change; and converting 9 multi-line, nested `assertEqual(a, b)` calls across 3 test
+files to `expect(a).toEqual(b)`, next to look-alikes that must not change. Each model was run in its
+own vendor's agent with its native edit tool, and in pi with each edit tool.
 
-| Model and tool | Tasks passed | Tool calls | Edit calls | Time |
-|---|---|---|---|---|
-| gpt-6-luna, pi built-in edit | 6/6 | 41 | 18 | 105 s |
-| gpt-6-luna, pi-hashline-edit | 6/6 | 50 | 20 | 113 s |
-| gpt-6-luna, pi-multiedit | 6/6 | 24 | 8 | 111 s |
-| claude-sonnet-5-5, pi built-in edit | 6/6 | 23 | 5 | 74 s |
-| claude-sonnet-5-5, pi-hashline-edit | 6/6 | 21 | 4 | 72 s |
-| claude-sonnet-5-5, pi-multiedit | 6/6 | 18 | 6 | 51 s |
+| Model and setup | Tasks passed | Tool calls | Edit calls | Edits via shell | Time |
+|---|---|---|---|---|---|
+| claude-sonnet-5-5, Claude Code (native Edit) | 8/8 | 37 | 8 | 8 | 130 s |
+| claude-sonnet-5-5, pi built-in edit | 8/8 | 31 | 5 | 10 | 106 s |
+| claude-sonnet-5-5, pi-hashline-edit | 8/8 | 27 | 4 | 7 | 102 s |
+| claude-sonnet-5-5, pi-multiedit | 8/8 | 28 | 9 | 0 | 101 s |
+| gpt-6-luna, Codex (native apply_patch) | 8/8 | 25 | 7 | 1 | 158 s |
+| gpt-6-luna, pi built-in edit | 7/8 | 54 | 21 | 1 | 145 s |
+| gpt-6-luna, pi-hashline-edit | 7/8 | 66 | 21 | 5 | 196 s |
+| gpt-6-luna, pi-multiedit | 8/8 | 36 | 11 | 0 | 146 s |
 
-Every tool got every task right, so the differences are in effort. With pi-multiedit, 11 of 12
-runs made the whole change in one edit call, with no argument errors. In the twelfth, two calls
-were correctly refused: one `old` matched twice, and an edit dropped the colon from a Python `def`;
-the retry fixed both. Total input tokens were 23% lower than with the built-in edit for GPT and 8%
-lower for Sonnet. Six runs per row show a direction, not a significant result, and wall time varies
-a lot between runs (one 31-second GPT run accounts for most of its total).
+"Edits via shell" counts files changed with `sed -i` or Python scripts instead of the edit tool:
+no checks, no feedback, and the way half-applied changes happen. pi-multiedit was the only setup
+with none, and the only pi setup where GPT passed every task (the two failures were Python scripts
+on the `assertEqual` task). It also used the fewest input tokens for GPT (120k against Codex's 640k,
+83% of which Codex served from cache). For Sonnet, input was about the same as pi's built-in edit
+and about a third below Claude Code. Two runs per task show a direction, not a significant result.
 
 ## Limits
 
