@@ -186,3 +186,27 @@ test("intent needs a scope and no other selector", async () => {
   const { read } = instance();
   await assert.rejects(read({ reads: [{ path: "src/repo.ts", intent: "x", search: "y" }] }), /at most one of search, outline, intent/);
 });
+
+test("a whole read of a large file returns the outline plus the parts the task is about", async () => {
+  const { Reader, ReadCache } = await import("../src/reader.ts");
+  const { listFiles, readText } = await import("../src/fs.ts");
+  const fn = (name: string, body: string) => [`export function ${name}(x: number): number {`, ...Array.from({ length: 48 }, (_, i) => `  const v${i} = x + ${i}; // ${body}`), "  return x;", "}", ""];
+  const names = ["parseConfig", "renderTheme", "loadPlugins", "computeDiff", "formatOutput", "readCache", "writeCache", "resolvePaths", "startServer", "stopServer"];
+  await writeFile(join(dir, "src/large.ts"), names.flatMap((n) => fn(n, n === "computeDiff" ? "diff context lines" : "other")).join("\n"));
+  const out = await new Reader(dir, { read: readText, list: listFiles }, new ReadCache(), undefined, "reduce the diff context lines").run([{ path: "src/large.ts" }]);
+  for (const n of names) assert.match(out, new RegExp(`#[A-Z]{2}:export function ${n}\\(`), `${n} missing from the outline`);
+  assert.match(out, /v47 = x \+ 47; \/\/ diff context lines/, "the matching body is shown in full");
+  assert.ok(!out.includes("// other"), "other bodies are collapsed");
+  const total = Number(/(\d+) lines; showing the outline and 1 part matching the task/.exec(out)?.[1]);
+  assert.ok(total > 500, out.slice(0, 300));
+  assert.match(out, new RegExp(`offset: 1, limit: ${total}`));
+});
+
+test("large-file shaping leaves small files, ranges and reads without an outline alone", async () => {
+  const { Reader, ReadCache } = await import("../src/reader.ts");
+  const { listFiles, readText } = await import("../src/fs.ts");
+  const r = () => new Reader(dir, { read: readText, list: listFiles }, new ReadCache(), undefined, "diff");
+  assert.match(await r().run([{ path: "src/large.ts", offset: 1, limit: 600 }]), /\/\/ other/);
+  assert.match(await r().run([{ path: "src/users.ts" }]), /fetchUser/);
+  assert.match(await r().run([{ path: "big.txt" }]), /line 1999/);
+});

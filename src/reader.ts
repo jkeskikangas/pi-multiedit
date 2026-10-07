@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { extname, matchesGlob, resolve } from "node:path";
 import { formatAnchored } from "./hash.ts";
 import { locate, termsOf, type Located } from "./locate.ts";
-import { outlineLines } from "./outline.ts";
+import { outlineBlocks, outlineLines } from "./outline.ts";
 import { splitLines } from "./text.ts";
 
 export type ReadItem = {
@@ -24,6 +24,9 @@ export type ReadItem = {
 export type Reranker = (intent: string, ranked: Located[]) => Promise<Located[]>;
 
 const INTENT_TOP = 8;
+/** A whole read of a file longer than this returns its outline plus the parts the task is about. */
+const LARGE_LINES = 400;
+const SHOWN_PARTS = 3;
 /** Matching lines one search shows; a wider search would flood the context. */
 const SEARCH_MAX_MATCHES = 50;
 
@@ -125,12 +128,15 @@ export class Reader {
   readonly fs: ReadFs;
   readonly cache: ReadCache;
   readonly rerank?: Reranker;
+  /** What the session is working on (the user's request, recent searches), for shaping large reads. */
+  readonly focus?: string;
 
-  constructor(cwd: string, fs: ReadFs, cache: ReadCache, rerank?: Reranker) {
+  constructor(cwd: string, fs: ReadFs, cache: ReadCache, rerank?: Reranker, focus?: string) {
     this.cwd = cwd;
     this.fs = fs;
     this.cache = cache;
     this.rerank = rerank;
+    this.focus = focus;
   }
 
   private abs(path: string): string {
@@ -210,6 +216,15 @@ export class Reader {
       this.out.push(`${path}: unchanged since your last read (lines ${from}-${to}); its anchors are still valid. Read it again to get the text.`);
       return;
     }
+    const shaped = item.offset === undefined && item.limit === undefined && lines.length > LARGE_LINES ? this.shape(path, text, lines) : undefined;
+    if (shaped) {
+      const rows = this.rows(abs, lines, shaped.numbers);
+      const taken = this.budget.take(rows);
+      this.cache.delivered(abs, hash, shaped.numbers.slice(0, taken.filter((r) => r !== "…").length));
+      const what = shaped.parts ? `the outline and ${shaped.parts} part${shaped.parts === 1 ? "" : "s"} matching the task` : "the outline (no part matched the task)";
+      this.out.push([`${path} (${lines.length} lines; showing ${what}. Read offset/limit to expand a part, or offset: 1, limit: ${lines.length} for the whole file)`, ...taken].join("\n"));
+      return;
+    }
     const numbers = Array.from({ length: to - from + 1 }, (_, k) => from + k);
     const rows = this.rows(abs, lines, numbers);
     const head = `${path} (${from === 1 && to === lines.length ? `${lines.length} lines` : `lines ${from}-${to} of ${lines.length}`})${state === "changed" ? " — changed since your last read" : ""}`;
@@ -223,6 +238,25 @@ export class Reader {
     const block = [head, ...taken];
     if (taken.length < rows.length) block.push(`[Lines ${from}-${shownTo} of ${lines.length}. Continue with offset=${shownTo + 1}.]`);
     this.out.push(block.join("\n"));
+  }
+
+  /** Outline lines plus the full bodies of the innermost parts whose text matches the focus. */
+  private shape(path: string, text: string, lines: string[]): { numbers: number[]; parts: number } | undefined {
+    const blocks = outlineBlocks(path, text);
+    if (!blocks?.length) return undefined;
+    const terms = this.focus ? termsOf(this.focus).map((t) => t.toLowerCase()) : [];
+    const scored = blocks
+      .map((b) => {
+        const body = lines.slice(b.line - 1, b.end).join("\n").toLowerCase();
+        return { b, score: terms.filter((t) => body.includes(t)).length };
+      })
+      .filter((x) => x.score > 0);
+    // Prefer the innermost match: a method over the class that contains it.
+    const inner = scored.filter((x) => !scored.some((y) => y !== x && y.b.line >= x.b.line && y.b.end <= x.b.end && (y.b.line !== x.b.line || y.b.end !== x.b.end)));
+    const chosen = inner.sort((a, b) => b.score - a.score).slice(0, SHOWN_PARTS).map((x) => x.b);
+    const numbers = new Set(blocks.map((b) => b.line));
+    for (const b of chosen) for (let n = b.line; n <= b.end; n++) numbers.add(n);
+    return { numbers: [...numbers].sort((a, b) => a - b), parts: chosen.length };
   }
 
   private async list(glob: string): Promise<void> {

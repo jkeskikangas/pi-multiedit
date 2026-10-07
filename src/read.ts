@@ -4,6 +4,7 @@ import { extname, resolve } from "node:path";
 import { createReadToolDefinition, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { listFiles, readText } from "./fs.ts";
+import { focusOf } from "./focus.ts";
 import { jevReranker } from "./jev.ts";
 import { MAX_BYTES, MAX_LINES, ReadCache, Reader, validate, type ReadItem } from "./reader.ts";
 
@@ -66,7 +67,8 @@ export function registerReadTool(pi: ExtensionAPI, opts: { search?: boolean } = 
         // Images go to pi's built-in read, which returns them as attachments.
         return createReadToolDefinition(ctx.cwd).execute(id, { path: resolve(ctx.cwd, only.path) }, signal, onUpdate, ctx);
       }
-      const text = await new Reader(ctx.cwd, { read: readText, list: listFiles }, cache, jevReranker(ctx.modelRegistry, ctx.cwd)).run(params.reads);
+      const reader = new Reader(ctx.cwd, { read: readText, list: listFiles }, cache, jevReranker(ctx.modelRegistry, ctx.cwd), focusOf(ctx.sessionManager));
+      const text = await reader.run(params.reads);
       return { content: [{ type: "text", text }], details: undefined };
     },
   });

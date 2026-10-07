@@ -23,11 +23,23 @@ const ELIXIR_DEFINITIONS = new Set(["def", "defp", "defmacro", "defmacrop", "def
 
 /** Declaration lines, or undefined when the file type has no outline. */
 export function outlineLines(path: string, text: string): number[] | undefined {
+  return outlineBlocks(path, text)?.map((b) => b.line);
+}
+
+export type Block = { line: number; end: number };
+
+/** Declarations (or Markdown sections) with the 1-based lines they span, sorted by start line. */
+export function outlineBlocks(path: string, text: string): Block[] | undefined {
   const ext = extname(path).toLowerCase();
-  if (ext === ".md" || ext === ".markdown") return markdownHeadings(text);
+  if (ext === ".md" || ext === ".markdown") {
+    const heads = markdownHeadings(text);
+    const total = text.split("\n").length;
+    return heads.map((line, i) => ({ line, end: (heads[i + 1] ?? total + 1) - 1 }));
+  }
   const root = parseRoot(path, text);
   if (!root) return undefined;
-  const lines = new Set<number>();
+  const blocks = new Map<number, number>();
+  const lines = { add: (line: number, node: TreeNode) => blocks.set(line, Math.max(blocks.get(line) ?? 0, node.range().end.line + 1)) };
   const visit = (node: TreeNode, depth: number) => {
     for (const child of node.children()) {
       const kind = child.kind();
@@ -36,20 +48,19 @@ export function outlineLines(path: string, text: string): number[] | undefined {
         // Elixir: `defmodule …`, `def …` and friends are calls named by their first identifier.
         const name = child.children()[0]?.text();
         if (name && ELIXIR_DEFINITIONS.has(name)) {
-          lines.add(line);
+          lines.add(line, child);
           if (ELIXIR_CONTAINERS.has(name)) for (const c of child.children()) if (c.kind() === "do_block") visit(c, depth + 1);
         }
         continue;
       }
-      if (kind === "export_statement") lines.add(line);
-      else if (DECLARATION.has(kind)) lines.add(line);
+      if (kind === "export_statement" || DECLARATION.has(kind)) lines.add(line, child);
       // Function bodies are skipped: in Python a "block" is a body only below a class.
       const intoBlock = kind !== "block" || node.kind() === "class_definition";
       if (CONTAINER.has(kind) && intoBlock && depth < 4 && !(kind === "statement_block" && node.kind() !== "internal_module")) visit(child, depth + 1);
     }
   };
   visit(root, 0);
-  return [...lines].sort((a, b) => a - b);
+  return [...blocks].map(([line, end]) => ({ line, end })).sort((a, b) => a.line - b.line);
 }
 
 function markdownHeadings(text: string): number[] {

@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { registerBashReads } from "./src/bash-reads.ts";
 import { registerGrepTool } from "./src/grep.ts";
 import { registerReadTool } from "./src/read.ts";
 import { registerEditTool } from "./src/tool.ts";
@@ -9,6 +10,8 @@ export default function (pi: ExtensionAPI): void {
   registerReadTool(pi, { search: !ownGrep });
   if (ownGrep) registerGrepTool(pi);
   registerEditTool(pi);
+  // Under evaluation: PI_MULTIEDIT_BASH_READS=1 shapes a plain `cat` of a large file like read does.
+  if (process.env.PI_MULTIEDIT_BASH_READS === "1") registerBashReads(pi);
   // Whole-file edits create and overwrite files, so pi's write tool would be a second way to do it;
   // Tree navigation restores the tool set recorded in the transcript, so withdraw it there too.
   // read searches, outlines and lists files too, so pi's grep, find and ls go the same way.

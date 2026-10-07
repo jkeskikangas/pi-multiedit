@@ -78,7 +78,7 @@ export type TreeNode = {
   text(): string;
   isLeaf(): boolean;
   children(): TreeNode[];
-  range(): { start: { line: number; index: number }; end: { index: number } };
+  range(): { start: { line: number; index: number }; end: { line: number; index: number } };
 };
 
 /** The parse tree of `text`, or undefined when no grammar is available for the file's extension. */
