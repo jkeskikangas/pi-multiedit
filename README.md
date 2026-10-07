@@ -150,7 +150,7 @@ ran in its own vendor's agent with its native edit tool, and in pi with each edi
 | Claude Code | 28 | 6 | 8 | 250k | 9.0k | 117s |
 | pi built-in | 32 | 8 | 7 | 155k | 7.8k | 111s |
 | pi-hashline-edit | 21 | 1 | 9 | 162k | 6.3k | 99s |
-| **pi-multiedit** | 27 | 8 | **0** | 171k | 6.7k | 107s |
+| **pi-multiedit** | 28 | 9 | **0** | 160k | 6.6k | 114s |
 
 **claude-sonnet-5-5**
 
@@ -159,7 +159,7 @@ ran in its own vendor's agent with its native edit tool, and in pi with each edi
 | Claude Code | 35 | 6 | 8 | 265k | 9.7k | 122s |
 | pi built-in | 32 | 5 | 11 | 169k | 7.8k | 105s |
 | pi-hashline-edit | 27 | 4 | 7 | 173k | 7.1k | 99s |
-| **pi-multiedit** | 28 | 9 | **0** | 168k | 7.1k | 98s |
+| **pi-multiedit** | **24** | 8 | **0** | **142k** | **6.6k** | **84s** |
 
 **gpt-6-sol**
 
@@ -168,7 +168,7 @@ ran in its own vendor's agent with its native edit tool, and in pi with each edi
 | Codex | 42 | 9 | 0 | 805k | 6.8k | 232s |
 | pi built-in | 62 | 26 | 2 | 122k | 5.5k | 200s |
 | pi-hashline-edit | 57 | 24 | 0 | 137k | 4.0k | 150s |
-| **pi-multiedit** | **32** | 8 | **0** | **86k** | **3.7k** | **147s** |
+| **pi-multiedit** | **36** | 10 | **0** | **90k** | **3.8k** | **146s** |
 
 **gpt-6-luna**
 
@@ -177,7 +177,7 @@ ran in its own vendor's agent with its native edit tool, and in pi with each edi
 | Codex | 28 | 7 | 1 | 689k | 5.5k | 163s |
 | pi built-in | 58 | 23 | 1 | 131k | 4.8k | 151s |
 | pi-hashline-edit | 63 | 20 | 5 | 211k | 6.1k | 199s |
-| **pi-multiedit** | 36 | 11 | **0** | **120k** | **4.1k** | 157s |
+| **pi-multiedit** | 40 | 9 | **0** | **106k** | **3.9k** | **128s** |
 
 Every setup passed all 8 tasks except gpt-6-luna with pi built-in and with pi-hashline-edit (7/8
 each; both failures were Python scripts on the `assertEqual` task). Claude Code and Codex are each
@@ -185,12 +185,13 @@ model's own agent with its native edit tool.
 
 "Shell edits" counts files changed with `sed -i` or Python scripts instead of the edit tool:
 no checks, no feedback, and the way half-applied changes happen. pi-multiedit is the only setup
-with none for every model. GPT models gain the most: with gpt-6-sol it needed about half the tool
-calls of pi's other edit tools and the fewest input and output tokens of all four setups. Claude
-models already batch their edits, so their numbers are close; with them, pi-multiedit's gain is
-that every edit goes through the tool instead of `sed`. Input tokens include cached input, which
-the native agents use heavily (Codex served about 83% from cache). Two runs per task show a
-direction, not a significant result.
+with none for every model. The GPT models gain the most: with gpt-6-sol it needed about 40% fewer
+tool calls than pi's other edit tools and the fewest input and output tokens of all four setups.
+Claude models already batch their edits, so their numbers are closer; with them, pi-multiedit's
+main gain is that every edit goes through the tool instead of `sed`. Input tokens include cached
+input, which the native agents use heavily (Codex served about 83% from cache). The pi-multiedit
+rows are from this version, with pi's `write` tool withdrawn. Two runs per task show a direction,
+not a significant result: a single extra turn moves a model's totals by several percent.
 
 ## Limits
 
