@@ -7,8 +7,7 @@ import { similarity, splitLines } from "./text.ts";
 
 export type FileReport = {
   path: string;
-  status: "modified" | "created" | "deleted" | "moved";
-  movedTo?: string;
+  status: "modified" | "created" | "deleted";
   before: string | null;
   after: string | null;
 };
@@ -83,16 +82,12 @@ export function renderReport(files: FileReport[]): string {
       blocks.push(`${f.path}: deleted`);
       continue;
     }
-    const head = f.status === "moved" ? `${f.path} -> ${f.movedTo}` : f.path;
+    const head = f.path;
     if (f.status === "created") {
       blocks.push(`${head}: created (${splitLines(f.after!).length} lines)`);
       continue;
     }
     const { added, removed } = countChanges(f.before!, f.after!);
-    if (added + removed === 0) {
-      blocks.push(`${head}: moved, content unchanged`);
-      continue;
-    }
     const lines = changedLines(f.before!, f.after!);
     const cap = Math.min(PER_FILE, budget);
     budget -= Math.min(lines.length, cap);

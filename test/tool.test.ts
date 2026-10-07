@@ -20,7 +20,12 @@ before(async () => {
 });
 after(async () => rm(dir, { recursive: true, force: true }));
 
-const run = (params: object) => tools.get("edit")!.execute("id", params, undefined, undefined, { cwd: dir });
+/** Test shorthand: `path` beside `edits` scopes every edit that names none. */
+const run = (params: { path?: string; edits?: object[]; [k: string]: unknown }) => {
+  const { path, edits, ...rest } = params;
+  const scopedEdits = edits?.map((e) => ("path" in e || "glob" in e ? e : { ...e, path }));
+  return tools.get("edit")!.execute("id", { ...rest, edits: scopedEdits }, undefined, undefined, { cwd: dir });
+};
 const text = (r: { content: { text: string }[] }) => r.content.map((c) => c.text).join("\n");
 
 test("failure is an error result listing every failure, and nothing is written", async () => {
@@ -32,13 +37,6 @@ test("failure is an error result listing every failure, and nothing is written",
   assert.equal(await readFile(join(dir, "a.txt"), "utf8"), "one\n");
 });
 
-test("dryRun reports the diff and writes nothing", async () => {
-  await writeFile(join(dir, "d.txt"), "const alpha = 1;\n");
-  const r = await run({ path: "d.txt", edits: [{ old: "alpha = 1", new: "alpha = 2" }], dryRun: true });
-  assert.match(text(r), /Dry run, nothing written/);
-  assert.match(text(r), /alpha = \[-1-\]\{\+2\+\}/);
-  assert.equal(await readFile(join(dir, "d.txt"), "utf8"), "const alpha = 1;\n");
-});
 
 
 
@@ -79,16 +77,24 @@ test("a file that was already broken stays editable", async () => {
   assert.match(text(r), /syntax: ok/);
 });
 
-test("the schema accepts the canonical shape and rejects the alternatives", async () => {
+test("the schema accepts the canonical shape and rejects everything else", async () => {
   const { editSchema } = await import("../src/tool.ts");
   const { Value } = await import("typebox/value");
   const ok = (v: unknown) => Value.Check(editSchema, v);
-  assert.ok(ok({ path: "a.ts", edits: [{ old: "x", new: "y" }, { from: "3#KT", to: "5#BH", action: "delete" }] }));
-  assert.ok(ok({ edits: [{ path: "l.json", json: "/suites/-", new: { path: "t.exs", layer: "unit" } }, { glob: "**/*.ex", ast: "f($A)", new: "g($A)", count: "all" }] }));
-  assert.ok(!ok({ path: "a.ts", edits: [{ oldText: "x", newText: "y" }] }), "built-in aliases");
-  assert.ok(!ok({ edits: [{ path: "a.ts", edits: [{ old: "x", new: "y" }] }] }), "per-file groups");
-  assert.ok(!ok({ glob: "*.ts", edits: [{ old: "x", new: "y" }] }), "top-level glob");
-  assert.ok(!ok({ path: "a.ts", edits: [{ old: "x", new: "y", count: 0 }] }), "count below 1");
+  assert.ok(ok({ edits: [{ path: "a.ts", old: "x", new: "y" }, { path: "a.ts", from: "3#KT", to: "5#BH", action: "delete" }] }));
+  assert.ok(ok({ edits: [{ path: "l.json", json: "/suites/-", new: { path: "t.exs" } }, { glob: "**/*.ex", ast: "f($A)", new: "g($A)", count: "all" }] }));
+  assert.ok(ok({ edits: [{ path: "new.ts", new: "x" }, { path: "old.ts", action: "delete" }], allowSyntaxErrors: true }));
+  for (const [why, bad] of Object.entries({
+    "top-level path": { path: "a.ts", edits: [{ old: "x", new: "y" }] },
+    patch: { patch: "*** Begin Patch\n*** End Patch" },
+    files: { files: [{ path: "a.ts", delete: true }] },
+    dryRun: { edits: [], dryRun: true },
+    until: { edits: [{ path: "a.ts", from: "x", until: "y" }] },
+    lang: { edits: [{ path: "a.ts", ast: "f()", lang: "ts" }] },
+    aliases: { edits: [{ path: "a.ts", oldText: "x", newText: "y" }] },
+    groups: { edits: [{ path: "a.ts", edits: [{ old: "x", new: "y" }] }] },
+    "count below 1": { edits: [{ path: "a.ts", old: "x", new: "y", count: 0 }] },
+  })) assert.ok(!ok(bad), why);
 });
 
 test("new must be a string outside json", async () => {

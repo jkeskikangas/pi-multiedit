@@ -1,7 +1,7 @@
 # pi-multiedit
 
 One edit call for a whole change in [pi](https://pi.dev). An agent can rename a function across a
-codebase, move a file and fix its imports, add an entry to a JSON registry and rewrite a section
+codebase, create a module and register it, add an entry to a JSON registry and rewrite a section
 of docs, all in a single `edit` call that applies everything or nothing. What comes back is what
 landed on disk, line by line.
 
@@ -39,8 +39,10 @@ none of this is needed.
 - **No new syntax errors.** Every edited file with a known grammar is parsed before and after.
   An edit that breaks parsing is refused, and the broken lines come back with anchors. Errors
   that were already in the file don't count.
-- **One strict shape, explained in full.** The tool has one canonical argument shape. Its
-  description covers every field and ends with a complete example. In evals, that brought tool
+- **One concept, no overlapping options.** Every change is an edit: a scope, at most one
+  selector, an action and a count. Without a selector, an edit applies to the whole file, which
+  is how files are created, appended to or deleted. There is no second syntax and no alias. The
+  description covers every field and ends with a complete example; in evals, that brought tool
   errors to zero where looser variants had several.
 
 ## The two tools
@@ -48,32 +50,34 @@ none of this is needed.
 | Tool | What it does |
 |---|---|
 | `read{path, offset?, limit?}` | Returns text with an anchor on every line (`12#KT:  return total`). The hashes are compatible with pi-hashline-edit. Images and other non-text files use pi's built-in `read`. |
-| `edit{path?, edits?, files?, patch?, dryRun?, allowSyntaxErrors?}` | Applies every step in order, all or nothing. `path` is the default file for edits that don't name one. |
+| `edit{edits, allowSyntaxErrors?}` | Applies every edit in order, all or nothing. |
 
-Each item in `edits` has a **scope**, exactly one **selector**, and optionally an **action** and a
-**count**:
+Each edit has a **scope**, at most one **selector**, and optionally an **action** and a **count**:
 
 | | Options |
 |---|---|
 | scope | `path`, or `glob` over git-visible files (e.g. `lib/**/*.ex`) |
-| selector | `old`: exact text · `from` + `to` (inclusive) or `until` (exclusive): an anchor or exact text at each end · `regex` (+ `flags`), where `new` may use `$1` and `$<name>` · `ast` (+ `lang`), an ast-grep pattern whose `$X` and `$$$X` can be reused in `new` · `json`, a pointer whose segments may be `[key=value]` or `-` (append) |
+| selector | `old`: exact text · `from` + `to`: whole lines between two anchors, inclusive (an end may also be exact text) · `regex` (+ `flags`), where `new` may use `$1` and `$<name>` · `ast`: an ast-grep pattern whose `$X` and `$$$X` can be reused in `new` · `json`: a pointer whose segments may be `[key=value]` or `-` (append) · none: the whole file (`path` only) |
 | action | `replace` (default), `before`, `after`, `delete` (the default when `new` is omitted) |
 | count | how many matches are expected across the scope: `1` (default), a number, or `"all"` |
 
 `new` is text for every selector except `json`, where it is the JSON value itself (`"integration"`,
-`3`, `{"path": "a"}`). `files` creates, moves or deletes whole files before the edits run. `patch`
-accepts a Codex `apply_patch` envelope, which GPT models write natively. `dryRun` shows the diff
-without writing.
+`3`, `{"path": "a"}`). The action composes with every selector the same way. On the whole file,
+`replace` creates or overwrites it, `before`/`after` prepend or append, and `delete` removes it.
 
-A single call that changes code, a JSON registry and every matching call site:
+A single call that changes code, creates a file, updates a JSON registry and every matching call
+site:
 
 ```json
 {"edits": [
   {"path": "lib/accounts.ex", "from": "12#KT", "to": "15#BH", "action": "delete"},
+  {"path": "lib/accounts/api.ex", "new": "defmodule Accounts.Api do\nend\n"},
   {"glob": "lib/**/*.ex", "old": "Repo.get(", "new": "Repo.get!(", "count": "all"},
   {"path": "test/layers.json", "json": "/suites/-", "new": {"path": "test/accounts_api_test.exs", "layer": "integration"}}
 ]}
 ```
+
+Moving a file is not an edit; use `git mv`.
 
 ## What comes back
 
@@ -136,17 +140,17 @@ docs, a Python rename that adds a parameter, and a TypeScript config and docs ch
 |---|---|---|---|---|
 | gpt-6-luna, pi built-in edit | 6/6 | 41 | 18 | 105 s |
 | gpt-6-luna, pi-hashline-edit | 6/6 | 50 | 20 | 113 s |
-| gpt-6-luna, pi-multiedit | 6/6 | 23 | 7 | 75 s |
+| gpt-6-luna, pi-multiedit | 6/6 | 24 | 8 | 111 s |
 | claude-sonnet-5-5, pi built-in edit | 6/6 | 23 | 5 | 74 s |
 | claude-sonnet-5-5, pi-hashline-edit | 6/6 | 21 | 4 | 72 s |
-| claude-sonnet-5-5, pi-multiedit | 6/6 | 18 | 6 | 46 s |
+| claude-sonnet-5-5, pi-multiedit | 6/6 | 18 | 6 | 51 s |
 
 Every tool got every task right, so the differences are in effort. With pi-multiedit, 11 of 12
-runs made the whole change in one edit call. The one exception was a correct refusal: GPT dropped
-trailing commas, the syntax check refused the call, and the retry fixed them. Total input tokens
-were 30% lower than with the built-in edit for GPT and 5% lower for Sonnet, whose prompt is cached.
-Six runs per row show a direction, not a significant result, and wall time varies a lot between
-runs.
+runs made the whole change in one edit call, with no argument errors. In the twelfth, two calls
+were correctly refused: one `old` matched twice, and an edit dropped the colon from a Python `def`;
+the retry fixed both. Total input tokens were 23% lower than with the built-in edit for GPT and 8%
+lower for Sonnet. Six runs per row show a direction, not a significant result, and wall time varies
+a lot between runs (one 31-second GPT run accounts for most of its total).
 
 ## Limits
 
@@ -154,12 +158,12 @@ runs.
 - A consistently CRLF file keeps CRLF. In a file with mixed line endings, unedited lines keep
   theirs. Edited lines are written with LF, and a multi-line `old` only matches loosely there (the
   result says so).
-- Writes go through symlinks to the file they point to. `files` won't delete or move a symlink
-  itself; use bash for links.
+- Writes go through symlinks to the file they point to. Deleting a symlink itself is refused; use
+  bash for links.
 - Each write replaces the file with a new one (temp file and rename). The file mode is kept, but
   hard links break and the owner and extended attributes are not kept.
-- `ast` and the syntax check cover TypeScript, JavaScript, CSS, HTML, Elixir and Python. To add a
-  language, install its `@ast-grep/lang-<name>` package next to this one.
+- `ast` and the syntax check cover TypeScript, JavaScript, CSS, HTML, Elixir and Python, chosen by
+  file extension. To add a language, install its `@ast-grep/lang-<name>` package next to this one.
 
 ## How it works
 
@@ -189,8 +193,8 @@ npx tsc -p .        # typecheck
 ## Credits
 
 Hash-anchored lines come from [oh-my-pi](https://github.com/can1357/oh-my-pi), and the hashes
-match [pi-hashline-edit](https://github.com/RimuruW/pi-hashline-edit). The `patch` input follows
-Codex's `apply_patch` format. Structural matching uses [ast-grep](https://ast-grep.github.io).
+match [pi-hashline-edit](https://github.com/RimuruW/pi-hashline-edit). Structural matching uses
+[ast-grep](https://ast-grep.github.io).
 
 ## License
 

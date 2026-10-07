@@ -12,7 +12,7 @@ export type FileChange = {
   before: string | null;
   /** Raw content to leave on disk, or null to delete. */
   after: string | null;
-  /** Mode for a newly created file (a moved file keeps its source's mode). */
+  /** Set by commit from the existing file, so the rewrite keeps its mode. */
   mode?: number;
 };
 

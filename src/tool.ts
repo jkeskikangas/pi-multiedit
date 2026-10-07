@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { lstat, readFile, realpath, stat } from "node:fs/promises";
+import { lstat, readFile, realpath } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -29,10 +29,8 @@ const editItem = Type.Object(
     regex: Type.Optional(Type.String()),
     flags: Type.Optional(Type.String()),
     ast: Type.Optional(Type.String()),
-    lang: Type.Optional(Type.String()),
     from: Type.Optional(Type.String()),
     to: Type.Optional(Type.String()),
-    until: Type.Optional(Type.String()),
     json: Type.Optional(Type.String()),
     new: Type.Optional(Type.Unknown({ description: "string; any JSON value with json" })),
     action: Type.Optional(Type.Union([Type.Literal("replace"), Type.Literal("before"), Type.Literal("after"), Type.Literal("delete")])),
@@ -41,29 +39,15 @@ const editItem = Type.Object(
   { additionalProperties: false },
 );
 
-const fileItem = Type.Object(
-  {
-    path: Type.String(),
-    write: Type.Optional(Type.String()),
-    moveTo: Type.Optional(Type.String()),
-    delete: Type.Optional(Type.Boolean()),
-  },
-  { additionalProperties: false },
-);
-
 export const editSchema = Type.Object(
   {
-    path: Type.Optional(Type.String()),
-    edits: Type.Optional(Type.Array(editItem)),
-    files: Type.Optional(Type.Array(fileItem)),
-    patch: Type.Optional(Type.String()),
-    dryRun: Type.Optional(Type.Boolean()),
+    edits: Type.Array(editItem),
     allowSyntaxErrors: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },
 );
 
-type Params = EditRequest & { dryRun?: boolean; allowSyntaxErrors?: boolean };
+type Params = EditRequest & { allowSyntaxErrors?: boolean };
 
 export type EditDetails = {
   files: { path: string; status: FileReport["status"]; diff: string }[];
@@ -72,15 +56,16 @@ export type EditDetails = {
 
 const DESCRIPTION = `Edit files: many edits across many files in one call, all-or-nothing. If any edit fails, nothing is written and every failure is listed with nearby N#HH anchors.
 
-Each item of edits: a scope (path, or glob over git-visible files; top-level path is the default), exactly one selector, optional action and count.
+Each edit: a scope (path, or glob over git-visible files), at most one selector, optional action and count.
+Selectors:
 - old: exact text. A miss retries ignoring trailing whitespace/curly quotes, then a uniform indentation shift (re-indenting new), and says so.
-- from + to (inclusive) or until (exclusive): a range; each end is an anchor from read (N#HH, or N#HH:content, content checked exactly) covering whole lines, or exact text.
+- from [+ to]: whole lines from one anchor to another, inclusive; an anchor is N#HH or N#HH:content from read (content checked exactly), or exact text.
 - regex (+ flags): JS regex; new may use $1, $<name>, $&.
-- ast (+ lang): ast-grep pattern; reuse $X / $$$X in new.
+- ast: ast-grep pattern; reuse $X / $$$X in new.
 - json: JSON pointer; segments are keys, indexes, - (append) or [key=value]. new is the JSON value itself, e.g. "unit", 3, {"path": "a"}.
+- none: the whole file (path only): new creates or overwrites it, before/after prepends/appends, delete deletes it.
 action: replace (default), before, after, delete (default without new). On line ranges new is whole lines; new: "" removes them.
 count: expected matches across the scope: 1 (default), a number, or "all".
-files: write/moveTo/delete whole files, before edits. patch: a Codex apply_patch envelope, first. dryRun: show the diff, write nothing.
 Edits run in order; anchors refer to the file as last read and are mapped through earlier edits.
 An edit that introduces a parse error is refused (existing errors don't count); allowSyntaxErrors only if the parser is wrong.
 The result is the re-read disk state, changed lines only (+N#HH:text added, ~N#HH:[-old-]{+new+} rewritten), with anchors usable next call. Don't re-read or git diff to confirm.
@@ -89,7 +74,8 @@ Example:
 {"edits": [
   {"path": "lib/a.ex", "old": "Repo.get(User, id)", "new": "Repo.get!(User, id)"},
   {"path": "lib/a.ex", "from": "12#KT", "to": "15#BH", "action": "delete"},
-  {"path": "test/layers.json", "json": "/suites/-", "new": {"path": "test/a_test.exs", "layer": "unit"}},
+  {"path": "lib/b.ex", "new": "defmodule B do\nend\n"},
+  {"path": "test/layers.json", "json": "/suites/-", "new": {"path": "test/b_test.exs", "layer": "unit"}},
   {"glob": "lib/**/*.ex", "ast": "Logger.debug($MSG)", "action": "delete", "count": "all"}
 ]}`;
 
@@ -157,7 +143,7 @@ function syntaxSummary(reports: FileReport[]): { summary: string; warning?: stri
   const broken: string[] = [];
   for (const r of reports) {
     if (r.after === null) continue;
-    const path = r.movedTo ?? r.path;
+    const path = r.path;
     const lines = newSyntaxErrors(path, r.before, r.after);
     if (lines === undefined) continue;
     checked++;
@@ -203,27 +189,16 @@ export function registerEditTool(pi: ExtensionAPI): void {
       signal?.throwIfAborted();
 
       const changed = [...plan.files.values()].filter((st) => st.cur !== st.orig || (st.orig === null && st.cur !== null));
-      const changes: FileChange[] = [];
-      for (const st of changed) {
-        let mode: number | undefined;
-        if (st.orig === null && st.movedFrom) mode = (await stat(st.movedFrom).catch(() => undefined))?.mode;
-        changes.push({ abs: st.abs, before: st.raw, after: toRaw(st, st.cur), mode: mode === undefined ? undefined : mode & 0o7777 });
-      }
-      const movedTo = new Map(changed.filter((s) => s.movedFrom).map((s) => [s.movedFrom!, s]));
-      const reports: FileReport[] = [];
-      for (const st of changed) {
-        const rel = planner.rel(st.abs);
-        if (st.movedFrom && movedTo.get(st.movedFrom) === st) continue;
-        const dest = movedTo.get(st.abs);
-        if (dest && st.cur === null) {
-          reports.push({ path: rel, status: "moved", movedTo: planner.rel(dest.abs), before: st.orig, after: dest.cur });
-        } else if (st.cur === null) reports.push({ path: rel, status: "deleted", before: st.orig, after: null });
-        else if (st.orig === null) reports.push({ path: rel, status: "created", before: null, after: st.cur });
-        else reports.push({ path: rel, status: "modified", before: st.orig, after: st.cur });
-      }
+      const changes: FileChange[] = changed.map((st) => ({ abs: st.abs, before: st.raw, after: toRaw(st, st.cur) }));
+      const reports: FileReport[] = changed.map((st) => ({
+        path: planner.rel(st.abs),
+        status: st.cur === null ? "deleted" : st.orig === null ? "created" : "modified",
+        before: st.orig,
+        after: st.cur,
+      }));
       const details: EditDetails = {
         written: false,
-        files: reports.map((r) => ({ path: r.movedTo ? `${r.path} -> ${r.movedTo}` : r.path, status: r.status, diff: generateDiffString(r.before ?? "", r.after ?? "").diff })),
+        files: reports.map((r) => ({ path: r.path, status: r.status, diff: generateDiffString(r.before ?? "", r.after ?? "").diff })),
       };
       const noteText = plan.notes.map((n) => `step ${n.edit}: ${n.text}`).join("\n");
       const body = renderReport(reports);
@@ -231,13 +206,10 @@ export function registerEditTool(pi: ExtensionAPI): void {
         return { content: [{ type: "text", text: ["No changes: the edits leave every file as it was.", noteText].filter(Boolean).join("\n") }], details };
       }
       const syntax = syntaxSummary(reports);
-      if (syntax.broken && !params.allowSyntaxErrors && !params.dryRun) {
+      if (syntax.broken && !params.allowSyntaxErrors) {
         throw new Error(
           `Nothing was written: the edit introduces parse errors. Fix them in the retry, or set allowSyntaxErrors if the parser is wrong.\n${syntax.warning}`,
         );
-      }
-      if (params.dryRun) {
-        return { content: [{ type: "text", text: [`Dry run, nothing written. ${changes.length} file(s) would change; ${syntax.summary}.`, syntax.warning, noteText, body].filter(Boolean).join("\n\n") }], details };
       }
 
       await withLocks(changes.map((c) => c.abs), () => commit(changes));
@@ -255,20 +227,10 @@ export function registerEditTool(pi: ExtensionAPI): void {
     },
 
     renderCall(args: Params, theme) {
-      const targets = new Set<string>();
-      if (args.path) targets.add(args.path);
-      for (const e of args.edits ?? []) targets.add(e.glob ?? e.path ?? args.path ?? "?");
-      for (const f of args.files ?? []) targets.add(f.path);
-      if (args.patch) for (const m of args.patch.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)) targets.add(m[1].trim());
-      const n = (args.edits?.length ?? 0) + (args.files?.length ?? 0);
-      const list = [...targets];
-      const shown = list.slice(0, 3).join(", ") + (list.length > 3 ? ` +${list.length - 3}` : "");
-      const flags = args.dryRun ? "dry run" : "";
-      return new Text(
-        `${theme.fg("toolTitle", theme.bold("edit"))} ${theme.fg("accent", shown)}${n > 1 ? theme.fg("muted", ` (${n} steps)`) : ""}${flags ? theme.fg("muted", ` · ${flags}`) : ""}`,
-        0,
-        0,
-      );
+      const targets = [...new Set((args.edits ?? []).map((e) => e.glob ?? e.path ?? "?"))];
+      const shown = targets.slice(0, 3).join(", ") + (targets.length > 3 ? ` +${targets.length - 3}` : "");
+      const n = args.edits?.length ?? 0;
+      return new Text(`${theme.fg("toolTitle", theme.bold("edit"))} ${theme.fg("accent", shown)}${n > 1 ? theme.fg("muted", ` (${n} edits)`) : ""}`, 0, 0);
     },
 
     renderResult(result, _options, theme, context) {

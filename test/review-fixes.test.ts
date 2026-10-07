@@ -18,7 +18,10 @@ before(async () => {
 });
 after(async () => rm(dir, { recursive: true, force: true }));
 
-const run = (params: object) => edit.execute("id", params, undefined, undefined, { cwd: dir });
+const run = (params: { path?: string; edits?: object[] }) => {
+  const { path, edits } = params;
+  return edit.execute("id", { edits: edits?.map((e) => ("path" in e || "glob" in e ? e : { ...e, path })) }, undefined, undefined, { cwd: dir });
+};
 const text = (r: { content: { text: string }[] }) => r.content.map((c) => c.text).join("\n");
 const withTimeout = <T>(p: Promise<T>, ms = 3000) =>
   Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error("timed out (deadlock?)")), ms))]);
@@ -39,11 +42,10 @@ test("edits through an alias and the real path in one call both land", async () 
   assert.equal(await readFile(join(dir, "real.txt"), "utf8"), "A\nB\n");
 });
 
-test("deleting or moving a symlink is refused and its target survives", async () => {
+test("deleting a symlink is refused and its target survives", async () => {
   await writeFile(join(dir, "target.txt"), "keep\n");
   await symlink("target.txt", join(dir, "link.txt"));
-  await assert.rejects(run({ files: [{ path: "link.txt", delete: true }] }), /symlink/);
-  await assert.rejects(run({ files: [{ path: "link.txt", moveTo: "moved.txt" }] }), /symlink/);
+  await assert.rejects(run({ edits: [{ path: "link.txt", action: "delete" }] }), /symlink/);
   assert.equal(await readFile(join(dir, "target.txt"), "utf8"), "keep\n");
   assert.equal(await readlink(join(dir, "link.txt")), "target.txt");
 });
@@ -76,10 +78,4 @@ test("old text missing while new text exists elsewhere is a failure with a hint,
 
 
 
-test("a patch Delete File on a symlink is refused and its target survives", async () => {
-  await writeFile(join(dir, "ptarget.txt"), "keep\n");
-  await symlink("ptarget.txt", join(dir, "plink.txt"));
-  await assert.rejects(run({ patch: "*** Begin Patch\n*** Delete File: plink.txt\n*** End Patch" }), /symlink/);
-  assert.equal(await readFile(join(dir, "ptarget.txt"), "utf8"), "keep\n");
-});
 

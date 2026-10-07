@@ -46,10 +46,14 @@ function planner(dir: string) {
   });
 }
 
+/** Test shorthand: `path` beside `edits` scopes every edit that names none. */
+type Req = EditRequest & { path?: string };
+const scoped = (req: Req): EditRequest => ({ edits: (req.edits ?? []).map((e) => (e.path ?? e.glob ? e : { ...e, path: req.path })) });
+
 /** Plans and, when it succeeds, commits; returns failures and the resulting disk content. */
-async function apply(dir: string, req: EditRequest) {
+async function apply(dir: string, req: Req) {
   const p = planner(dir);
-  const plan = await p.run(req);
+  const plan = await p.run(scoped(req));
   if (plan.failures.length === 0) {
     const changes: FileChange[] = [...plan.files.values()]
       .filter((s) => s.cur !== s.orig)
@@ -198,9 +202,10 @@ describe("line anchors and ranges", () => {
     assert.ok(plan.failures[0].hints![0].includes(`${A(3)}:c`));
   });
 
-  test("text range with until cuts up to (not including) the next heading", async () => {
+
+  test("an anchored range replaces a section up to the line before the next heading", async () => {
     const dir = await setup({ "doc.md": lines("# A", "old 1", "old 2", "# B", "keep") });
-    const { read } = await apply(dir, { path: "doc.md", edits: [{ from: "# A\n", until: "# B", new: "# A\nnew\n" }] });
+    const { read } = await apply(dir, { path: "doc.md", edits: [{ from: anchorOf(2, "old 1"), to: anchorOf(3, "old 2"), new: "new" }] });
     assert.equal(await read("doc.md"), lines("# A", "new", "# B", "keep"));
   });
 
@@ -312,48 +317,36 @@ describe("forms models actually send (from evals)", () => {
   });
 });
 
-describe("file operations and patches", () => {
-  test("move then edit at the new path, delete, create", async () => {
-    const dir = await setup({ "old.ts": lines("export const a = 1;"), "gone.ts": "x\n" });
+describe("whole-file edits (no selector)", () => {
+  test("create, overwrite, append, prepend and delete files in one call", async () => {
+    const dir = await setup({ "old.txt": "old\n", "log.txt": "b\n", "gone.txt": "x\n" });
     const { plan, read } = await apply(dir, {
-      files: [{ path: "old.ts", moveTo: "src/new.ts" }, { path: "gone.ts", delete: true }, { path: "src/index.ts", write: 'export * from "./new";\n' }],
-      edits: [{ path: "src/new.ts", old: "a = 1", new: "a = 2" }],
+      edits: [
+        { path: "src/new.ts", new: "export const a = 1;\n" },
+        { path: "old.txt", new: "replaced\n" },
+        { path: "log.txt", action: "after", new: "c\n" },
+        { path: "log.txt", action: "before", new: "a\n" },
+        { path: "gone.txt", action: "delete" },
+      ],
     });
     assert.deepEqual(plan.failures, []);
-    assert.equal(await read("old.ts"), null);
-    assert.equal(await read("gone.ts"), null);
-    assert.equal(await read("src/new.ts"), lines("export const a = 2;"));
-    assert.equal(await read("src/index.ts"), 'export * from "./new";\n');
+    assert.equal(await read("src/new.ts"), "export const a = 1;\n");
+    assert.equal(await read("old.txt"), "replaced\n");
+    assert.equal(await read("log.txt"), "a\nb\nc\n");
+    assert.equal(await read("gone.txt"), null);
   });
 
-  test("anchors read from a file keep working after it is moved", async () => {
-    const dir = await setup({ "a.txt": lines("one", "two") });
-    const { read } = await apply(dir, {
-      files: [{ path: "a.txt", moveTo: "b.txt" }],
-      edits: [{ path: "b.txt", from: anchorOf(2, "two"), new: "TWO" }],
-    });
-    assert.equal(await read("b.txt"), lines("one", "TWO"));
+  test("a created file can be edited later in the same call", async () => {
+    const dir = await setup({});
+    const { read } = await apply(dir, { edits: [{ path: "n.txt", new: "one\n" }, { path: "n.txt", old: "one", new: "two" }] });
+    assert.equal(await read("n.txt"), "two\n");
   });
 
-  test("Codex apply_patch envelope: update with context, add, move", async () => {
-    const dir = await setup({ "app.py": lines("def main():", "    x = 1", "    print(x)", "", "def other():", "    pass") });
-    const patch = [
-      "*** Begin Patch",
-      "*** Update File: app.py",
-      "*** Move to: src/app.py",
-      "@@ def main():",
-      "     x = 1",
-      "-    print(x)",
-      "+    print(x + 1)",
-      "*** Add File: src/__init__.py",
-      "+# package",
-      "*** End Patch",
-    ].join("\n");
-    const { plan, read } = await apply(dir, { patch });
-    assert.deepEqual(plan.failures, []);
-    assert.equal(await read("app.py"), null);
-    assert.equal(await read("src/app.py"), lines("def main():", "    x = 1", "    print(x + 1)", "", "def other():", "    pass"));
-    assert.equal(await read("src/__init__.py"), "# package\n");
+  test("whole-file edits need a path, not a glob, and delete needs an existing file", async () => {
+    const dir = await setup({ "a.txt": "a\n" });
+    const { plan } = await apply(dir, { edits: [{ glob: "*.txt", action: "delete" }, { path: "missing.txt", action: "delete" }] });
+    assert.match(plan.failures[0].message, /whole-file edit needs path/);
+    assert.match(plan.failures[1].message, /does not exist/);
   });
 });
 
@@ -405,7 +398,7 @@ describe("encoding and commit safety", () => {
 
   test("planning is read-only (dry run)", async () => {
     const dir = await setup({ "a.txt": "a\n" });
-    await planner(dir).run({ path: "a.txt", edits: [{ old: "a", new: "A" }] });
+    await planner(dir).run({ edits: [{ path: "a.txt", old: "a", new: "A" }] });
     assert.equal(await readFile(join(dir, "a.txt"), "utf8"), "a\n");
     assert.ok(relative(root, dir));
   });

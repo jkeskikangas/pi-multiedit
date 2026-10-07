@@ -5,7 +5,6 @@ import { astFind } from "./ast.ts";
 import { ANCHOR_PREFIX_RE, formatAnchored, lineHash, parseAnchor } from "./hash.ts";
 import { jsonEdit } from "./json.ts";
 import { findAll, fuzzyFind, lineAt, lineStarts, nearestHints, splitLines, type Fuzz, type Span } from "./text.ts";
-import { parseV4A, type Hunk } from "./v4a.ts";
 
 export type Action = "replace" | "before" | "after" | "delete";
 
@@ -16,10 +15,8 @@ export type EditSpec = {
   regex?: string;
   flags?: string;
   ast?: string;
-  lang?: string;
   from?: string;
   to?: string;
-  until?: string;
   json?: string;
   /** Text for the text selectors; a JSON value (any type) for `json`. */
   new?: unknown;
@@ -30,14 +27,7 @@ export type EditSpec = {
 /** An edit whose `new` is text: every selector except `json`. */
 type TextEdit = Omit<EditSpec, "new"> & { new?: string };
 
-export type FileSpec = { path: string; write?: string; moveTo?: string; delete?: boolean };
-
-export type EditRequest = {
-  path?: string;
-  edits?: EditSpec[];
-  files?: FileSpec[];
-  patch?: string;
-};
+export type EditRequest = { edits?: EditSpec[] };
 
 /** Filesystem reads the planner needs; `null` content means the file does not exist. */
 export type PlanFs = {
@@ -63,10 +53,6 @@ export type FileState = {
   rewrittenBy?: number;
   /** Raw disk content at planning time (what the commit re-checks), or null if absent. */
   raw: string | null;
-  /** For a move destination: the source's start-of-call content, which its anchors refer to. */
-  anchorBase?: string | null;
-  /** For a move destination: the source path (its mode is kept). */
-  movedFrom?: string;
 };
 
 export type Note = { edit: number; text: string };
@@ -140,10 +126,8 @@ export class Planner {
   }
 
   async run(req: EditRequest): Promise<Plan> {
-    if (req.patch) await this.step(() => this.patch(req.patch!));
-    for (const f of req.files ?? []) await this.step(() => this.fileOp(f));
-    for (const e of req.edits ?? []) await this.step(() => this.edit(e, req.path));
-    if (this.editNo === 0) this.failures.push({ edit: 0, message: "nothing to do: pass edits, files or patch" });
+    for (const e of req.edits ?? []) await this.step(() => this.edit(e));
+    if (this.editNo === 0) this.failures.push({ edit: 0, message: "nothing to do: pass edits" });
     return { files: this.files, notes: this.notes, failures: this.failures, editCount: this.editNo };
   }
 
@@ -157,46 +141,29 @@ export class Planner {
     }
   }
 
-  // ── file operations ──────────────────────────────────────────────────────────
+  // ── edits ────────────────────────────────────────────────────────────────────
 
-  private async fileOp(f: FileSpec): Promise<void> {
-    const abs = this.abs(f.path);
-    if ((f.delete || f.moveTo !== undefined) && (await this.fs.isSymlink?.(abs))) {
-      throw new EditError(`${f.path}: is a symlink; this tool edits file content, so delete or move links with bash`, undefined, f.path);
+  /** No selector: the edit applies to the whole file (create/overwrite, prepend/append, delete). */
+  private async wholeFile(e: TextEdit, action: Action): Promise<void> {
+    if (e.path === undefined) throw new EditError("a whole-file edit needs path (not glob)");
+    if (e.count !== undefined) throw new EditError("count needs a selector");
+    const abs = this.abs(e.path);
+    if (action === "delete" && (await this.fs.isSymlink?.(abs))) {
+      throw new EditError(`${e.path}: is a symlink; this tool edits file content, so delete links with bash`, undefined, e.path);
     }
     const st = await this.state(abs);
-    const kinds = [f.write !== undefined, f.moveTo !== undefined, f.delete === true].filter(Boolean).length;
-    if (kinds !== 1) throw new EditError(`${f.path}: give exactly one of write, moveTo, delete`, undefined, f.path);
-    if (f.write !== undefined) {
-      if (ANCHOR_PREFIX_RE.test(f.write)) throw new EditError(`${f.path}: content starts with a LINE#HASH: prefix; send literal file content`);
-      st.cur = norm(f.write);
+    if (action === "replace") {
+      if (e.new!.split("\n").some((l) => ANCHOR_PREFIX_RE.test(l))) throw new EditError(`${e.path}: new contains N#HH: prefixes; send literal content`);
+      st.cur = e.new!;
       st.rewrittenBy = this.editNo;
       return;
     }
-    if (st.cur === null) throw new EditError(`${f.path}: does not exist`, undefined, f.path);
-    if (f.delete) {
-      st.cur = null;
-      return;
-    }
-    const dest = this.abs(f.moveTo!);
-    const dst = await this.state(dest);
-    if (dst.cur !== null) throw new EditError(`${f.moveTo}: already exists; delete it first or write it`, undefined, f.moveTo);
-    // The destination inherits the source's identity so anchors read from the source still work.
-    Object.assign(dst, {
-      cur: st.cur,
-      changes: [...st.changes],
-      rewrittenBy: st.rewrittenBy,
-      bom: st.bom,
-      crlf: st.crlf,
-      anchorBase: st.anchorBase !== undefined ? st.anchorBase : st.orig,
-      movedFrom: st.movedFrom ?? st.abs,
-    });
-    st.cur = null;
+    const cur = (await this.live(abs)).cur!;
+    if (action === "delete") st.cur = null;
+    else this.applySpans(st, [action === "before" ? { start: 0, end: 0, replacement: e.new! } : { start: cur.length, end: cur.length, replacement: e.new! }]);
   }
 
-  // ── edits ────────────────────────────────────────────────────────────────────
-
-  private async targets(e: TextEdit, defaultPath?: string): Promise<string[]> {
+  private async targets(e: TextEdit): Promise<string[]> {
     if (e.glob !== undefined && e.path !== undefined) throw new EditError("give path or glob, not both");
     if (e.glob !== undefined) {
       this.listing ??= await this.fs.list(this.cwd);
@@ -212,12 +179,11 @@ export class Planner {
       if (live.length === 0) throw new EditError(`glob ${e.glob} matched no files`);
       return live.sort();
     }
-    const path = e.path ?? defaultPath;
-    if (!path) throw new EditError("edit needs path or glob (or a top-level path)");
-    return [(await this.state(this.abs(path))).abs];
+    if (!e.path) throw new EditError("edit needs path or glob");
+    return [(await this.state(this.abs(e.path))).abs];
   }
 
-  private async edit(raw: EditSpec, defaultPath?: string): Promise<void> {
+  private async edit(raw: EditSpec): Promise<void> {
     if (raw.json === undefined && raw.new !== undefined && typeof raw.new !== "string") {
       throw new EditError("new must be a string; only json takes a JSON value");
     }
@@ -232,13 +198,11 @@ export class Planner {
     }
     if (e.old !== undefined) e.old = norm(e.old);
     const selectors = (["old", "regex", "ast", "from", "json"] as const).filter((k) => e[k] !== undefined);
-    if (selectors.length !== 1) {
-      throw new EditError(`give exactly one selector (old, regex, ast, from[/to|until], json); got ${selectors.join(", ") || "none"}`);
-    }
-    if ((e.to !== undefined || e.until !== undefined) && e.from === undefined) throw new EditError("to/until need from");
-    if (e.to !== undefined && e.until !== undefined) throw new EditError("give to (inclusive) or until (exclusive), not both");
+    if (selectors.length > 1) throw new EditError(`give at most one selector (old, from[+to], regex, ast, json); got ${selectors.join(", ")}`);
+    if (e.to !== undefined && e.from === undefined) throw new EditError("to needs from");
+    if (selectors.length === 0) return this.wholeFile(e, action);
 
-    const paths = await this.targets(e, defaultPath);
+    const paths = await this.targets(e);
     const kind = selectors[0];
 
     if (kind === "json") {
@@ -326,7 +290,7 @@ export class Planner {
       }
       case "ast": {
         try {
-          return wrap(astFind(st.abs, text, e.ast!, e.new ?? "", e.lang));
+          return wrap(astFind(st.abs, text, e.ast!, e.new ?? ""));
         } catch (err) {
           throw new EditError(`${this.rel(st.abs)}: ${(err as Error).message}`, undefined, this.rel(st.abs));
         }
@@ -348,14 +312,14 @@ export class Planner {
   private range(e: TextEdit, st: FileState, action: Action): { spans: Span[]; fuzz: Fuzz } {
     const text = st.cur!;
     const from = this.locate(e.from!, st, 0, "from");
-    const endRef = e.to ?? e.until;
+    const endRef = e.to;
     const start = from.start;
     let end = from.end;
     let lineShaped = from.line;
     if (endRef !== undefined) {
-      const to = this.locate(endRef, st, from.end, e.to !== undefined ? "to" : "until");
-      if (to.start < from.start) throw new EditError(`${e.to !== undefined ? "to" : "until"} is before from`, undefined, this.rel(st.abs));
-      end = e.to !== undefined ? to.end : to.start;
+      const to = this.locate(endRef, st, from.end, "to");
+      if (to.start < from.start) throw new EditError("to is before from", undefined, this.rel(st.abs));
+      end = to.end;
       lineShaped = from.line && to.line;
     }
     let add = e.new ?? "";
@@ -396,7 +360,7 @@ export class Planner {
   /** Validates an anchor against the file as it was read, then maps it through this call's edits. */
   private mapAnchor(a: { line: number; hash: string; content?: string }, st: FileState, role: string): number {
     const rel = this.rel(st.abs);
-    const base = st.anchorBase !== undefined ? st.anchorBase : st.orig;
+    const base = st.orig;
     if (base === null) throw new EditError(`${role} ${a.line}#${a.hash}: ${rel} did not exist when this call started; anchor by text`, undefined, rel);
     if (st.rewrittenBy !== undefined) throw new EditError(`${role} ${a.line}#${a.hash}: ${rel} was rewritten by step ${st.rewrittenBy}; anchor by text`, undefined, rel);
     const lines = splitLines(base);
@@ -499,86 +463,6 @@ export class Planner {
     st.cur = text;
   }
 
-  // ── V4A patch ────────────────────────────────────────────────────────────────
-
-  private async patch(patch: string): Promise<void> {
-    let ops;
-    try {
-      ops = parseV4A(norm(patch));
-    } catch (err) {
-      throw new EditError(`patch: ${(err as Error).message}`);
-    }
-    for (const op of ops) {
-      const abs = this.abs(op.path);
-      const st = await this.state(abs);
-      if (op.kind === "add") {
-        if (st.cur !== null) throw new EditError(`patch: Add File ${op.path}: already exists (use Update File)`, undefined, op.path);
-        st.cur = op.content;
-        st.rewrittenBy = this.editNo;
-        continue;
-      }
-      if (st.cur === null) throw new EditError(`patch: ${op.path} does not exist`, undefined, op.path);
-      if (op.kind === "delete") {
-        await this.fileOp({ path: op.path, delete: true });
-        continue;
-      }
-      if (op.hunks.length) this.applySpans(st, hunkSpans(st.cur, op.hunks, op.path, this.notes, this.editNo));
-      if (op.moveTo) await this.fileOp({ path: op.path, moveTo: op.moveTo });
-    }
-  }
-}
-
-function hunkSpans(text: string, hunks: Hunk[], path: string, notes: Note[], step: number): Span[] {
-  const lines = splitLines(text);
-  const starts = lineStarts(text);
-  const offset = (line: number) => (line < starts.length ? starts[line] : text.length);
-  const spans: Span[] = [];
-  let cursor = 0;
-  const levels: [Fuzz | "trim", (s: string) => string][] = [
-    ["exact", (s) => s],
-    ["loose", (s) => s.trimEnd()],
-    ["trim", (s) => s.trim()],
-  ];
-  for (const [n, h] of hunks.entries()) {
-    if (h.header) {
-      const at = lines.findIndex((l, i) => i >= cursor && l.trim() === h.header!.trim());
-      const loose = at === -1 ? lines.findIndex((l, i) => i >= cursor && l.includes(h.header!.trim())) : at;
-      if (loose === -1) throw new EditError(`patch: ${path} hunk ${n + 1}: @@ ${h.header} not found`, nearestHints(text, h.header), path);
-      cursor = loose + 1;
-    }
-    let at = -1;
-    let used = "exact";
-    if (h.old.length === 0) {
-      at = h.eof || !h.header ? lines.length : cursor;
-    } else {
-      for (const [name, f] of levels) {
-        const want = h.old.map(f);
-        const match = (i: number) => want.every((w, k) => f(lines[i + k]) === w);
-        const cands: number[] = [];
-        for (let i = cursor; i + want.length <= lines.length; i++) if (match(i)) cands.push(i);
-        if (cands.length) {
-          at = h.eof && match(lines.length - want.length) ? lines.length - want.length : cands[0];
-          used = name;
-          break;
-        }
-      }
-    }
-    if (at === -1) {
-      throw new EditError(`patch: ${path} hunk ${n + 1}: context not found`, nearestHints(text, h.old.join("\n")), path);
-    }
-    if (used !== "exact") notes.push({ edit: step, text: `${path} hunk ${n + 1}: context matched ignoring whitespace` });
-    const start = offset(at);
-    const endLine = at + h.old.length;
-    let end = offset(endLine);
-    let repl = h.new.length ? h.new.join("\n") + "\n" : "";
-    if (endLine >= lines.length && !text.endsWith("\n") && h.old.length) {
-      end = text.length;
-      repl = repl.replace(/\n$/, "");
-    }
-    spans.push({ start, end, replacement: repl });
-    cursor = endLine;
-  }
-  return spans;
 }
 
 /** `$&`, `$1`…`$99`, `$<name>` and `$$`, as in String.prototype.replace. */
