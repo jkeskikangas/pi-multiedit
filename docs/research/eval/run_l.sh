@@ -10,7 +10,7 @@ start=$(date +%s); cd "$D" || exit 1
 case $H in
   builtin) perl -e 'alarm 900; exec @ARGV' pi -ne -nc -ns -np --no-session $EXT --model $PROV/$M:low --mode json -p "$P" ;;
   multi)   perl -e 'alarm 900; exec @ARGV' pi -ne -nc -ns -np --no-session $EXT -e $ME --model $PROV/$M:low --mode json -p "$P" ;;
-  jev|jev2)     PI_JEV_LOG=1 perl -e 'alarm 900; exec @ARGV' pi -ne -nc -ns -np --no-session $EXT -e $ME -e $S/jevseed/index.ts --model $PROV/$M:low --mode json -p "$P" ;;
+  jev|jev2|jev3)     PI_JEV_LOG=1 perl -e 'alarm 900; exec @ARGV' pi -ne -nc -ns -np --no-session $EXT -e $ME -e $S/jevseed/index.ts --model $PROV/$M:low --mode json -p "$P" ;;
   ctx|ctx2)     PI_CONTEXT_LOG=1 perl -e 'alarm 900; exec @ARGV' pi -ne -nc -ns -np --no-session $EXT -e $ME -e $S/context/index.ts --model $PROV/$M:low --mode json -p "$P" ;;
   retire)  PI_RETIRE_LOG=1 perl -e 'alarm 900; exec @ARGV' pi -ne -nc -ns -np --no-session $EXT -e $ME -e $RT --model $PROV/$M:low --mode json -p "$P" ;;
   native)  perl -e 'alarm 900; exec @ARGV' claude -p "$P" --model $M --effort low --output-format stream-json --verbose \

@@ -261,3 +261,52 @@ Cross-model summary, treat e1–e4, seed v2 vs baseline:
 | claude-sonnet-5-5 | −19% | −28% | +19% | 7/8 → 7/8 |
 | gpt-6.1-sol | −27% | −33% | −18% | 8/8 → 8/8 |
 | gpt-6-luna | −38% | −48% | −10% | 5/8 → 5/8 |
+
+## Final: seed v3, four models, 4 fresh reps per cell (128 runs)
+
+v3 adds concept-to-file matching: every 2–4-word window of the prompt, hyphens included, becomes a
+snake_case token matched against `git ls-files` paths, so "the company-member read policy test" seeds
+`company_member_read_policy_test.exs` (p = 0.95; e2 for Sonnet went from 7–12 turns to 3 calls). Both
+arms were run fresh in the same hour (Claude API latency drifts between sessions: the Sonnet baseline
+measured 26 s earlier and 40 s here), treat e1–e4, low effort, reps 3–6.
+
+| Model | Arm | Pass | Wall s | Turns | Calls | Edit err | Out tok | Cache read | Cache write | Fresh in | Total tok | Cost $ |
+|---|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| opus 5.5 | baseline | 15/16 | 37 | 9.4 | 8.5 | 0.44 | 3.5k | 102k | 17k | 0 | 122k | 0.225 |
+| opus 5.5 | seed v3 | 15/16 | **28** | **4.5** | **3.6** | 0.25 | 2.8k | 77k | 20k | 0 | 100k | 0.233 |
+| sonnet 5.5 | baseline | 16/16 | 40 | 8.1 | 8.0 | 0.25 | 3.2k | 85k | 17k | 0 | 105k | 0.117 |
+| sonnet 5.5 | seed v3 | 14/16 | **27** | **4.6** | **3.6** | 0.12 | 2.5k | 74k | 20k | 0 | 97k | 0.121 |
+| gpt-6.1-sol | baseline | 15/16 | 42 | 6.2 | 6.4 | 0.00 | 1.1k | 35k | – | 19k | 55k | 0.052 |
+| gpt-6.1-sol | seed v3 | 16/16 | **33** | **3.9** | **3.5** | 0.06 | 1.1k | 35k | – | 17k | 53k | 0.048 |
+| gpt-6-luna | baseline | 7/16 | 20 | 7.5 | 9.5 | 0.25 | 1.3k | 149k | – | 34k | 184k | 0.006 |
+| gpt-6-luna | seed v3 | 8/16 | **18** | **4.3** | **4.4** | 0.38 | 1.3k | 56k | – | 19k | 76k | 0.003 |
+
+Relative to baseline:
+
+| Model | Turns | Calls | Wall | Total tokens | Cost | Pass |
+|---|--:|--:|--:|--:|--:|---|
+| opus 5.5 | −52% | −58% | −24% | −18% | +4% | 15/16 → 15/16 |
+| sonnet 5.5 | −43% | −55% | −33% | −8% | +3% | 16/16 → 14/16 |
+| gpt-6.1-sol | −37% | −45% | −21% | −4% | −8% | 15/16 → 16/16 |
+| gpt-6-luna | −43% | −54% | −10% | −59% | −50% | 7/16 → 8/16 |
+
+- **The decision rule (turns −20%, wall −15%, pass not worse, both Claude models) is met**, and the GPT
+  models agree. Turns roughly halve for every model; wall time falls 21–33% for three of four and 10%
+  for Luna, whose runs are too short for the seed's 1.5 s to vanish.
+- **Correctness:** unchanged within noise. Sonnet's two v3 misses are both e4 `doctor_specialty` left
+  non-optional/nullable, an omission it made at 1/8 in earlier baselines and 0/4 here; Luna fails half
+  the tasks in both arms. The seed never put a wrong file in whole: 25 of 32 v3 runs on e1/e2 edited
+  from the seed's anchors without a search (`first=edit` 21/64 overall, 100% on e1).
+- **Tokens:** total input+output falls 4–18% for Opus, Sonnet and Sol and 59% for Luna (which otherwise
+  re-reads heavily). Cost is flat for the Claude models because the seed's 25–30k characters are
+  written to the cache in the first request (cache write +3k tokens at 5× the read price) while the
+  saved reads are cheap; for Luna cost halves. Under this round's priorities (correctness, wall, turns)
+  that is the right trade; cost-sensitive users can lower `PI_JEV_CHARS`.
+- **Fixed cost of the seed:** two Jev requests, 1.4–1.9 s, plus `rg` over the candidate words (<0.3 s).
+  pi's own startup and shutdown (7–8 s) remain the largest fixed component of a 20–30 s run.
+
+**Recommendation:** ship the seed as an opt-in extension setting in pi-multiedit (`TYPESAFE_API_KEY`
+present → seed on; no key → silent no-op), with the bare-line-number acceptance already on `main`'s
+successor branch. Open items before a default-on: 4 reps on the pi and tulka task sets, a budget cap
+per repository size, and a check that a wrong whole-file seed cannot mislead (none observed in 96
+seeded runs, but the failure mode exists).

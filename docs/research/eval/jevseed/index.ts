@@ -34,6 +34,17 @@ function identifiers(prompt: string): { words: string[]; phrases: string[] } {
   }
   return { words: [...words].filter((w) => w.length >= 4 && !/^(the|and|for|with|from|that|this|into|only|when|each|must|does|not)$/i.test(w)).slice(0, 24), phrases: phrases.slice(0, 6) };
 }
+let pathCache: { cwd: string; paths: string[] } | undefined;
+async function listPaths(cwd: string): Promise<string[]> {
+  if (pathCache?.cwd === cwd) return pathCache.paths;
+  try {
+    const { stdout } = await run("git", ["ls-files", "-z"], { cwd, maxBuffer: 64 << 20 });
+    pathCache = { cwd, paths: stdout.split("\0").filter((p) => p && !/(^|\/)(node_modules|deps|_build|dist)\//.test(p)) };
+  } catch {
+    pathCache = { cwd, paths: [] };
+  }
+  return pathCache.paths;
+}
 async function rgFiles(cwd: string, args: string[]): Promise<string[]> {
   try {
     const { stdout } = await run("rg", ["-l", "--glob", "!node_modules", "--glob", "!deps", "--glob", "!_build", "--glob", "!*.lock", "--glob", "!dist", "--glob", "!*.{png,jpg,svg,mp3}", ...args, "."], { cwd, maxBuffer: 32 << 20 });
@@ -58,6 +69,20 @@ export default function (pi: ExtensionAPI): void {
         ...words.map(async (w) => bump(await rgFiles(cwd, ["-w", "-F", "-e", w]), 1)),
         ...phrases.map(async (p) => bump(await rgFiles(cwd, ["-i", "-F", "-e", p]), 3)),
       ]);
+      // Phrases that name a file by concept ("the company-member read policy test"): every window of
+      // 2–4 words, hyphens included, as a snake_case token matched against repository paths.
+      const paths = await listPaths(cwd);
+      const pw = prompt.toLowerCase().replace(/[`"'(),.:;]/g, " ").split(/\s+/).filter(Boolean);
+      const seenTok = new Set<string>();
+      for (let i = 0; i < pw.length; i++) {
+        for (let n = 2; n <= 4 && i + n <= pw.length; n++) {
+          const tok = pw.slice(i, i + n).join("_").replace(/-/g, "_");
+          if (tok.length < 8 || seenTok.has(tok) || !/^[a-z0-9_]+$/.test(tok)) continue;
+          seenTok.add(tok);
+          const matches = paths.filter((p) => p.includes(tok)).slice(0, 4);
+          for (const p of matches) hitCount.set(p, (hitCount.get(p) ?? 0) + 3);
+        }
+      }
       const candidates = [...hitCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, CANDIDATES).map(([f]) => f);
       if (!candidates.length) return undefined;
       const models = await ctx.modelRegistry.getAvailableOfType("classifier", "typesafe").catch(() => []);
