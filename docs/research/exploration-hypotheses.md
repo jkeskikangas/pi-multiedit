@@ -388,7 +388,7 @@ whole file when mostly selected. 4 models × e1–e4 × 4 reps, same day as the 
 | gpt-6-luna | v3 | 8/16 | 18 | 4.3 | 4.4 | 0.38 | 76k | 0.003 |
 | gpt-6-luna | v4 | 8/16 | 20* | 5.9 | 5.2 | 0.38 | 98k | 0.003 |
 
-\* one Luna e3 run hung at the 900 s cap (provider stall); excluded from the wall figure.
+\* one Luna e3 run hung for 4.2 h (15,222 s; a provider stall the harness's 900 s alarm did not catch) and is excluded from the wall figure.
 
 Per task, all models (turns / calls / wall): e1 2.1/1.2/14 → 2.6/1.6/18; e2 3.4/2.4/19 → 4.3/3.4/25;
 e3 4.3/3.3/36 → 4.4/3.2/36; **e4 7.4/8.2/37 → 7.2/7.4/34**.
