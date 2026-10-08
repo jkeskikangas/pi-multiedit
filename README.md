@@ -56,7 +56,7 @@ Each edit has a **scope**, at most one **selector**, and optionally an **action*
 | | Options |
 |---|---|
 | scope | `path`, or `glob` over git-visible files (e.g. `src/**/*.ts`) |
-| selector | `old`: exact text · `from` + `to`: whole lines between two anchors, inclusive (an end may also be exact text) · `regex` (+ `flags`), where `new` may use `$1` and `$<name>` · `json`: a pointer whose segments may be `[key=value]` or `-` (append) · none: the whole file (`path` only) |
+| selector | `old`: exact text · `from` + `to`: whole lines between two anchors, inclusive (an end may also be exact text, or a bare line number of a file this session has shown, checked against that view like an anchor) · `regex` (+ `flags`), where `new` may use `$1` and `$<name>` · `json`: a pointer whose segments may be `[key=value]` or `-` (append) · none: the whole file (`path` only) |
 | action | `replace` (default), `before`, `after`, `delete`. Every action except `delete` needs `new`; deleting is always explicit |
 | count | how many matches are expected across the scope: `1` (default), a number, or `"all"` |
 
@@ -192,6 +192,18 @@ main gain is that every edit goes through the tool instead of `sed`. Input token
 input, which the native agents use heavily (Codex served about 83% from cache). The pi-multiedit
 rows are from this version, with pi's `write` tool withdrawn. Two runs per task show a direction,
 not a significant result: a single extra turn moves a model's totals by several percent.
+
+## For other extensions
+
+A file that another extension puts in front of the model whole, with `N#HH` anchors, can count as
+read: emit `anchored-view` on pi's event bus with the absolute path and the exact text shown.
+
+```ts
+pi.events.emit("anchored-view", { path: "/abs/path/to/file.ts", text });
+```
+
+Bare line numbers in `from`/`to` then resolve against that view, with the same stale check as an
+anchor. The hashes are pi-hashline-edit's, so any implementation of them produces valid anchors.
 
 ## Limits
 
