@@ -369,3 +369,44 @@ possible version. What it does not do, in the order the data says to try:
 What stays true regardless of design: the seed must be labelled as already read and carry anchors, or
 the model re-reads it (H1's `context` tool showed that), and Jev's latency (1.4–1.9 s for two requests)
 is below the noise of a single API turn.
+
+## Seed v4: node-level (functions, test blocks, one-hop references, names-only recall pass)
+
+`eval/jevseed/node.ts`: candidate files → nodes (tree-sitter outline leaves; test blocks by heuristic)
+→ one hop along references from anchor nodes → a names-only Jev pass over the candidate directories'
+paths → Jev scores up to 300 nodes (30 per request, parallel) → sections with the file head, or the
+whole file when mostly selected. 4 models × e1–e4 × 4 reps, same day as the v3 and baseline cells.
+
+| Model | Arm | Pass | Wall s | Turns | Calls | Edit err | Total tok | Cost $ |
+|---|---|--:|--:|--:|--:|--:|--:|--:|
+| opus 5.5 | v3 whole-file | 15/16 | 28 | 4.5 | 3.6 | 0.25 | 100k | 0.233 |
+| opus 5.5 | v4 node | 16/16 | 27 | 3.9 | 3.0 | 0.06 | 77k | 0.208 |
+| sonnet 5.5 | v3 | 14/16 | 27 | 4.6 | 3.6 | 0.12 | 97k | 0.121 |
+| sonnet 5.5 | v4 | 13/16 | 29 | 4.4 | 3.6 | 0.06 | 84k | 0.110 |
+| gpt-6.1-sol | v3 | 16/16 | 33 | 3.9 | 3.5 | 0.06 | 53k | 0.048 |
+| gpt-6.1-sol | v4 | 16/16 | 33 | 4.2 | 3.8 | 0.00 | 49k | 0.040 |
+| gpt-6-luna | v3 | 8/16 | 18 | 4.3 | 4.4 | 0.38 | 76k | 0.003 |
+| gpt-6-luna | v4 | 8/16 | 20* | 5.9 | 5.2 | 0.38 | 98k | 0.003 |
+
+\* one Luna e3 run hung at the 900 s cap (provider stall); excluded from the wall figure.
+
+Per task, all models (turns / calls / wall): e1 2.1/1.2/14 → 2.6/1.6/18; e2 3.4/2.4/19 → 4.3/3.4/25;
+e3 4.3/3.3/36 → 4.4/3.2/36; **e4 7.4/8.2/37 → 7.2/7.4/34**.
+
+- **On turns and wall, v4 is a wash.** Opus gains (−13% turns, 16/16, edit errors 0.25 → 0.06); Sonnet
+  is flat; Sol and Luna lose a little. e4, the large-file task it was built for, improves marginally
+  (calls −10%, wall −3 s): the model's remaining e4 turns explore the mock data files, where "which
+  section" is ambiguous and the node scorer spread its picks over `cases.ts`, docs and the Elixir
+  `case_json.ex`. The easy tasks got slightly worse: sections make the model read what a whole file
+  would have settled (e1 2.1 → 2.6 turns).
+- **On tokens and cost, v4 wins for every model** (total −8…−23%, cost −8…−17%): sections replace whole
+  files, as designed.
+- **Latency** rose from 1.4–1.9 s to 2.7–4.2 s (10 node requests + the names pass), which cancels the
+  turn savings in wall time.
+
+**Verdict:** keep v3 (whole small files, batched Jev) as the design to ship; it carries the turn and
+wall gains with the simplest mechanism. Node-level selection is worth keeping only as a token-budget
+mode (large repositories, cost-sensitive runs), not as the default, and the "function list + call
+graph" question has its answer: ranking nodes with Jev works (the picks were right: `cases.ts:21`
+at 0.97 on e4, config/sender/test nodes at 0.76–0.95 on e3), but the agent's remaining turns on these
+tasks are not retrieval turns, so better retrieval cannot remove them.

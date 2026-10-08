@@ -16,6 +16,7 @@ case $H in
   jev3fast_high)  PI_JEV_LOG=1 perl -e 'alarm 900; exec @ARGV' pi -ne -nc -ns -np --no-session $EXT -e $ME -e $S/jevseed/index.ts -e $S/fast/index.ts --model $PROV/$M:high --mode json -p "$P" ;;
   multifast) perl -e 'alarm 900; exec @ARGV' pi -ne -nc -ns -np --no-session $EXT -e $ME -e $S/fast/index.ts --model $PROV/$M:max --mode json -p "$P" ;;
   jev3fast)  PI_JEV_LOG=1 perl -e 'alarm 900; exec @ARGV' pi -ne -nc -ns -np --no-session $EXT -e $ME -e $S/jevseed/index.ts -e $S/fast/index.ts --model $PROV/$M:max --mode json -p "$P" ;;
+  jev4)    PI_JEV_LOG=1 perl -e 'alarm 900; exec @ARGV' pi -ne -nc -ns -np --no-session $EXT -e $ME -e $S/jevseed/node.ts --model $PROV/$M:low --mode json -p "$P" ;;
   jev|jev2|jev3)     PI_JEV_LOG=1 perl -e 'alarm 900; exec @ARGV' pi -ne -nc -ns -np --no-session $EXT -e $ME -e $S/jevseed/index.ts --model $PROV/$M:low --mode json -p "$P" ;;
   ctx|ctx2)     PI_CONTEXT_LOG=1 perl -e 'alarm 900; exec @ARGV' pi -ne -nc -ns -np --no-session $EXT -e $ME -e $S/context/index.ts --model $PROV/$M:low --mode json -p "$P" ;;
   retire)  PI_RETIRE_LOG=1 perl -e 'alarm 900; exec @ARGV' pi -ne -nc -ns -np --no-session $EXT -e $ME -e $RT --model $PROV/$M:low --mode json -p "$P" ;;
