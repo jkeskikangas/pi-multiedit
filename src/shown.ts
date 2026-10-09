@@ -1,5 +1,5 @@
 // What the model has seen of each file, as line hashes: recorded whenever this extension shows a
-// file (read, an edit result, a seed). A bare line number in from/to resolves against it, so the
+// file (read, an edit result, a seed) and for the numbered lines of shell output (numbered.ts). A bare line number in from/to resolves against it, so the
 // usual stale-anchor check still applies and a number from an old view is refused, not misapplied.
 import { realpath } from "node:fs/promises";
 import { isAbsolute } from "node:path";
@@ -7,7 +7,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { lineHash } from "./hash.ts";
 import { splitLines } from "./text.ts";
 
-const shown = new Map<string, string[]>();
+const shown = new Map<string, (string | undefined)[]>();
 
 /** Records the file's current content as the model's view of it. `abs` is the canonical path. */
 export function noteShown(abs: string, text: string): void {
@@ -16,6 +16,13 @@ export function noteShown(abs: string, text: string): void {
     abs,
     lines.map((l, i) => lineHash(i + 1, l)),
   );
+}
+
+/** Records single lines the model saw with their numbers, on top of what it saw of the file before. */
+export function notePartial(abs: string, lines: Map<number, string>): void {
+  const view = shown.get(abs) ?? [];
+  for (const [n, text] of lines) view[n - 1] = lineHash(n, text);
+  shown.set(abs, view);
 }
 
 /** The hash the model would have for line `n` (1-based) of `abs`, or undefined when the file was never shown. */

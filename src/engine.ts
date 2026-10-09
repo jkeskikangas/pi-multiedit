@@ -345,7 +345,7 @@ export class Planner {
       const hash = this.fs.shownHash?.(st.abs, n);
       if (hash === undefined) {
         throw new EditError(
-          `${role} "${ref.trim()}" is a line number without its hash, and ${rel} has not been shown by read or edit in this session; use the N#HH anchor from read, or quote the line's text`,
+          `${role} "${ref.trim()}" is a line number without its hash, and ${rel} has not been shown with that number (by read, edit, or numbered shell output such as cat -n or rg -n) in this session; use the N#HH anchor from read, or quote the line's text`,
           undefined,
           rel,
         );

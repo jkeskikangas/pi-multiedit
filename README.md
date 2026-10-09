@@ -56,7 +56,7 @@ Each edit has a **scope**, at most one **selector**, and optionally an **action*
 | | Options |
 |---|---|
 | scope | `path`, or `glob` over git-visible files (e.g. `src/**/*.ts`) |
-| selector | `old`: exact text · `from` + `to`: whole lines between two anchors, inclusive (an end may also be exact text, or a bare line number of a file this session has shown, checked against that view like an anchor) · `regex` (+ `flags`), where `new` may use `$1` and `$<name>` · `json`: a pointer whose segments may be `[key=value]` or `-` (append) · none: the whole file (`path` only) |
+| selector | `old`: exact text · `from` + `to`: whole lines between two anchors, inclusive (an end may also be exact text, or a bare line number of a line this session has shown, by read, edit or numbered shell output such as `cat -n` and `rg -n`, checked against that view like an anchor) · `regex` (+ `flags`), where `new` may use `$1` and `$<name>` · `json`: a pointer whose segments may be `[key=value]` or `-` (append) · none: the whole file (`path` only) |
 | action | `replace` (default), `before`, `after`, `delete`. Every action except `delete` needs `new`; deleting is always explicit |
 | count | how many matches are expected across the scope: `1` (default), a number, or `"all"` |
 
@@ -192,6 +192,15 @@ main gain is that every edit goes through the tool instead of `sed`. Input token
 input, which the native agents use heavily (Codex served about 83% from cache). The pi-multiedit
 rows are from this version, with pi's `write` tool withdrawn. Two runs per task show a direction,
 not a significant result: a single extra turn moves a model's totals by several percent.
+
+## Line numbers from the shell
+
+Models often read files through bash, with `cat -n`, `nl`, `rg -n` or `grep -n`, and then edit by the
+line numbers they saw there. Each numbered line of a bash result is matched to a file, either by the
+path on the line or by a path in the command or output, and is recorded only when that file has exactly
+that text at that number. A bare number in `from`/`to` then resolves like one from `read`, stale check
+included. Unnumbered output, such as `sed -n 10,20p`, is not recorded, because the model would have to
+count the lines itself.
 
 ## For other extensions
 
