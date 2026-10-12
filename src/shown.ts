@@ -7,31 +7,49 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { lineHash } from "./hash.ts";
 import { splitLines } from "./text.ts";
 
-const shown = new Map<string, (string | undefined)[]>();
+// Views are kept per scope: the main session (the default everywhere) and one per draft (draft.ts),
+// so a number seen in a draft never validates an edit in the main session, or the reverse.
+
+/** The main session's scope; every caller that names no scope uses it. */
+export const MAIN_SCOPE = "main";
+
+const scopes = new Map<string, Map<string, (string | undefined)[]>>();
+
+function viewsOf(scope: string): Map<string, (string | undefined)[]> {
+  let views = scopes.get(scope);
+  if (!views) scopes.set(scope, (views = new Map()));
+  return views;
+}
 
 /** Records the file's current content as the model's view of it. `abs` is the canonical path. */
-export function noteShown(abs: string, text: string): void {
+export function noteShown(abs: string, text: string, scope: string = MAIN_SCOPE): void {
   const lines = splitLines(text);
-  shown.set(
+  viewsOf(scope).set(
     abs,
     lines.map((l, i) => lineHash(i + 1, l)),
   );
 }
 
 /** Records single lines the model saw with their numbers, on top of what it saw of the file before. */
-export function notePartial(abs: string, lines: Map<number, string>): void {
-  const view = shown.get(abs) ?? [];
+export function notePartial(abs: string, lines: Map<number, string>, scope: string = MAIN_SCOPE): void {
+  const views = viewsOf(scope);
+  const view = views.get(abs) ?? [];
   for (const [n, text] of lines) view[n - 1] = lineHash(n, text);
-  shown.set(abs, view);
+  views.set(abs, view);
 }
 
 /** The hash the model would have for line `n` (1-based) of `abs`, or undefined when the file was never shown. */
-export function shownHash(abs: string, n: number): string | undefined {
-  return shown.get(abs)?.[n - 1];
+export function shownHash(abs: string, n: number, scope: string = MAIN_SCOPE): string | undefined {
+  return scopes.get(scope)?.get(abs)?.[n - 1];
 }
 
-export function hasShown(abs: string): boolean {
-  return shown.has(abs);
+export function hasShown(abs: string, scope: string = MAIN_SCOPE): boolean {
+  return scopes.get(scope)?.has(abs) ?? false;
+}
+
+/** Forgets everything a scope saw (a draft that was applied or discarded). The main scope stays. */
+export function dropScope(scope: string): void {
+  if (scope !== MAIN_SCOPE) scopes.delete(scope);
 }
 
 /**
