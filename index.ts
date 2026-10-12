@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerReadTool } from "./src/read.ts";
+import { listenForDraftRequests } from "./src/draft.ts";
 import { listenForShellViews } from "./src/numbered.ts";
 import { listenForViews } from "./src/shown.ts";
 import { registerEditTool } from "./src/tool.ts";
@@ -11,6 +12,8 @@ export default function (pi: ExtensionAPI): void {
   listenForViews(pi);
   // So do lines shell output printed with their numbers (cat -n, rg -n, grep -n).
   listenForShellViews(pi);
+  // Other extensions edit in memory through drafts (src/draft.ts), then apply them all-or-nothing.
+  listenForDraftRequests(pi);
   // Whole-file edits create and overwrite files, so pi's write tool would be a second way to do it.
   // Tree navigation restores the tool set recorded in the transcript, so withdraw it there too.
   const withdrawWrite = async () => pi.setActiveTools(pi.getActiveTools().filter((name) => name !== "write"));

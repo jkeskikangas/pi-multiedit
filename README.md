@@ -214,6 +214,76 @@ pi.events.emit("anchored-view", { path: "/abs/path/to/file.ts", text });
 Bare line numbers in `from`/`to` then resolve against that view, with the same stale check as an
 anchor. The hashes are pi-hashline-edit's, so any implementation of them produces valid anchors.
 
+## Drafts
+
+A draft holds edits in memory instead of writing them, and applies them later as one
+all-or-nothing commit. It is for runs whose edits must not touch the user's files yet: a
+speculative turn, or review before write.
+
+Inside a draft, an edit call is planned against the draft's view of the workspace: disk, with the
+draft's own changes on top. Files it created exist there, and globs see them; files it deleted do
+not. Each call gets the same checks, failures and syntax check as a normal edit. A failing call
+leaves the draft as it was. The result text is a normal edit result, except that `drafted, not
+written` takes the place of `re-read from disk: …`, and `details.written` is false. For each file,
+the draft keeps the disk content from the moment it first touched the file, along with the latest
+content. Reading in a draft shows the drafted content, with the same anchors and paging as `read`.
+
+Each draft has its own record of what the model has seen. Line numbers seen in a draft never
+validate a bare line number in the main session, and line numbers seen in the main session never
+validate one in a draft. `anchored-view` events and numbered shell output count for the main
+session only.
+
+Applying commits the drafted files under the same check as a normal edit: no file may have changed
+since the draft read it. If one has, the draft's edit calls are replayed in order against the
+current disk, and the replayed result is committed if every call still applies. Bare line numbers
+in those calls are pinned to the anchors they meant when drafted. If any call no longer applies,
+for example because its anchor's line changed, nothing is written and the error names the files
+that moved. After a successful apply, the draft is gone and the written files count as shown in the
+main session.
+
+### API (`src/draft.ts`)
+
+```ts
+import { openDraft, draftEdit, draftRead, applyDraft, discardDraft, draftSummary, materializeDraft, getDraft } from "pi-multiedit/src/draft.ts";
+
+const id = await openDraft(cwd);                         // a new, empty draft over cwd
+await draftEdit(id, { edits, allowSyntaxErrors? });      // {content, details}; throws the edit error text
+await draftRead(id, { path, offset?, limit? });          // {content}: N#HH lines as read shows them
+draftSummary(id);   // {files: [{path, status: "created"|"modified"|"deleted", diff}], insertions, deletions}
+await materializeDraft(id, dir);  // writes drafted files into dir (same relative paths), deletes drafted deletions;
+                                  // refuses, writing nothing, if a drafted file is outside cwd
+await applyDraft(id);   // {content, details}: "Applied … ; re-read from disk: …"; throws with nothing written
+discardDraft(id);       // true if the draft existed
+getDraft(id);           // {id, cwd, changes: Map<abs, {abs, before, after}>, requests, shown} | undefined
+```
+
+Operations on one draft run in the order they were called. An unknown id is an error.
+
+### Event channel
+
+An extension that does not import pi-multiedit uses pi's event bus. The request goes on
+`multiedit:draft`, and the reply comes back through the `reply` callback in the payload. `reply`
+is called exactly once, also when the request fails.
+
+```ts
+pi.events.emit("multiedit:draft", { op: "open", cwd, reply: (r) => … });
+```
+
+| op | request | reply |
+| --- | --- | --- |
+| `open` | `{cwd}` (absolute) | `{draftId}` |
+| `edit` | `{draftId, params: {edits, allowSyntaxErrors?}}` | `{content, details}` (the edit tool's result) or `{error}` |
+| `read` | `{draftId, path, offset?, limit?}` | `{content}` or `{error}` |
+| `apply` | `{draftId}` | `{ok: true, content, details}` or `{ok: false, error}` |
+| `discard` | `{draftId}` | `{ok: true}` or `{error}` |
+| `summary` | `{draftId}` | `{files, insertions, deletions}` or `{error}` |
+| `materialize` | `{draftId, dir}` (absolute) | `{ok: true}` or `{ok: false, error}` |
+
+An unknown op or draft replies `{error}`; for `apply` and `materialize` the reply is `{ok: false, error}`.
+On load the extension emits `multiedit:draft-ready` with `{version: 1}`. A listener registered
+later misses that event, so it can send any request instead: if pi-multiedit is loaded, `reply` is
+called.
+
 ## Limits
 
 - Text files in valid UTF-8 only. Binary files and other encodings are refused, never rewritten.
@@ -259,7 +329,7 @@ temporary file is written) is overwritten without notice. Filesystems offer no w
 ```
 npm install
 npm test            # unit, property (fast-check) and tool tests; no model calls
-npx tsc -p .        # typecheck
+npm run typecheck   # tsc -p .
 ```
 
 ## Credits
