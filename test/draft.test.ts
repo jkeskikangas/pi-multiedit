@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -250,7 +250,12 @@ test("the event channel round-trips every op and replies exactly once, errors in
   assert.match(edited.content[0].text, /drafted, not written/);
   assert.equal(edited.details.written, false);
   assert.match((await ask({ op: "edit", draftId, params: { edits: [{ path: "ev.txt", old: "nope", new: "x" }] } })).error, /Nothing was written/);
-  assert.match((await ask({ op: "read", draftId, path: "ev.txt", offset: 2 })).content[0].text, /^2#[A-Z]{2}:BETA$/);
+  const read = await ask({ op: "read", draftId, path: "ev.txt", offset: 2 });
+  assert.match(read.content[0].text, /^2#[A-Z]{2}:BETA$/);
+  assert.equal(read.abs, join(await realpath(dir), "ev.txt"));
+  assert.equal(read.fileText, "alpha\nBETA\n");
+  // Detecting the channel: a summary for an unknown draft replies with an error at once.
+  assert.match((await ask({ op: "summary", draftId: "__probe__" })).error, /unknown draft __probe__/);
   assert.match((await ask({ op: "read", draftId, path: "missing.txt" })).error, /ENOENT/);
   const summary = await ask({ op: "summary", draftId });
   assert.deepEqual([summary.insertions, summary.deletions, summary.files[0].path], [1, 1, "ev.txt"]);

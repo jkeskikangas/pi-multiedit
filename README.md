@@ -248,7 +248,8 @@ import { openDraft, draftEdit, draftRead, applyDraft, discardDraft, draftSummary
 
 const id = await openDraft(cwd);                         // a new, empty draft over cwd
 await draftEdit(id, { edits, allowSyntaxErrors? });      // {content, details}; throws the edit error text
-await draftRead(id, { path, offset?, limit? });          // {content}: N#HH lines as read shows them
+await draftRead(id, { path, offset?, limit? });          // {content, abs, fileText}: N#HH lines as read shows them,
+                                                         // the canonical path, the whole file's raw text
 draftSummary(id);   // {files: [{path, status: "created"|"modified"|"deleted", diff}], insertions, deletions}
 await materializeDraft(id, dir);  // writes drafted files into dir (same relative paths), deletes drafted deletions;
                                   // refuses, writing nothing, if a drafted file is outside cwd
@@ -273,7 +274,7 @@ pi.events.emit("multiedit:draft", { op: "open", cwd, reply: (r) => … });
 | --- | --- | --- |
 | `open` | `{cwd}` (absolute) | `{draftId}` |
 | `edit` | `{draftId, params: {edits, allowSyntaxErrors?}}` | `{content, details}` (the edit tool's result) or `{error}` |
-| `read` | `{draftId, path, offset?, limit?}` | `{content}` or `{error}` |
+| `read` | `{draftId, path, offset?, limit?}` | `{content, abs, fileText}` or `{error}`: `abs` is the canonical path, `fileText` the whole file as drafted (or on disk) |
 | `apply` | `{draftId}` | `{ok: true, content, details}` or `{ok: false, error}` |
 | `discard` | `{draftId}` | `{ok: true}` or `{error}` |
 | `summary` | `{draftId}` | `{files, insertions, deletions}` or `{error}` |

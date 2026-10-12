@@ -184,8 +184,14 @@ export async function draftEdit(id: string, params: EditParams): Promise<EditRes
   return queued(d, () => editIn(d, params));
 }
 
-/** `read` inside the draft: drafted content with the same anchors and paging; records the view in the draft's scope. */
-export async function draftRead(id: string, params: { path: string; offset?: number; limit?: number }): Promise<{ content: { type: "text"; text: string }[] }> {
+/**
+ * `read` inside the draft: drafted content with the same anchors and paging; records the view in the
+ * draft's scope. Also returns the canonical path and the whole file's raw text. Binary files are refused.
+ */
+export async function draftRead(
+  id: string,
+  params: { path: string; offset?: number; limit?: number },
+): Promise<{ content: { type: "text"; text: string }[]; abs: string; fileText: string }> {
   const d = need(id);
   return queued(d, async () => {
     const abs = await canonicalDeep(resolve(d.cwd, fromHome(params.path)));
@@ -203,7 +209,8 @@ export async function draftRead(id: string, params: { path: string; offset?: num
     }
     const { out, view } = renderAnchored(raw, params.offset, params.limit);
     if (view !== undefined) noteShown(abs, view, d.shown);
-    return { content: [{ type: "text", text: out }] };
+    // abs: the canonical path; fileText: the whole file as drafted (or on disk), raw, not just the page shown.
+    return { content: [{ type: "text", text: out }], abs, fileText: raw };
   });
 }
 
