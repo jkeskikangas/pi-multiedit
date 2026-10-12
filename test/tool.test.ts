@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { registerReadTool } from "../src/read.ts";
@@ -62,6 +63,17 @@ test("an edit that introduces a parse error is refused with the broken lines, an
     (e: Error) => /Nothing was written: the edit introduces parse errors/.test(e.message) && /s\.ts\n {2}1#[A-Z]{2}:const a = 1;\n {2}2#[A-Z]{2}:const b = \(2;/.test(e.message),
   );
   assert.equal(await readFile(join(dir, "s.ts"), "utf8"), "const a = 1;\nconst b = 2;\n");
+});
+
+test("Python is checked with the bundled parser, without @ast-grep/lang-python installed", async () => {
+  assert.throws(() => createRequire(import.meta.url)("@ast-grep/lang-python"), "not a dependency");
+  await writeFile(join(dir, "m.py"), "def f():\n    return 1\n");
+  await assert.rejects(
+    run({ path: "m.py", edits: [{ old: "return 1", new: "return (1" }] }),
+    (e: Error) => /Nothing was written: the edit introduces parse errors/.test(e.message),
+  );
+  const ok = await run({ path: "m.py", edits: [{ old: "return 1", new: "return 2" }] });
+  assert.match(text(ok), /syntax: ok/);
 });
 
 test("allowSyntaxErrors writes anyway and still reports the errors", async () => {

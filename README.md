@@ -296,7 +296,8 @@ called.
 - Each write replaces the file with a new one (temp file and rename). The file mode is kept, but
   hard links break and the owner and extended attributes are not kept.
 - The syntax check covers TypeScript, JavaScript, CSS, HTML and Python out of the box, chosen by
-  file extension. Other languages (Go, Rust, Java, Ruby and more) need their
+  file extension. Python's parser is bundled (prebuilt for macOS and Linux on x64 and arm64,
+  and Windows x64), so installing runs no dependency install scripts. Other languages (Go, Rust, Java, Ruby and more) need their
   grammar: `npm i @ast-grep/lang-<name> --prefix ~/.pi/agent/npm`. Without it, the syntax check
   skips those files.
 

@@ -1,7 +1,9 @@
 // Tree-sitter parsing via ast-grep for the syntax check. Loaded on first use, so the native binding
 // and grammars cost nothing until an edited file needs checking.
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
-import { extname } from "node:path";
+import { dirname, extname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 
@@ -41,6 +43,22 @@ function load(): Napi {
   return napi;
 }
 
+// Python ships with the package: the prebuilt tree-sitter parsers of @ast-grep/lang-python 0.0.6
+// (vendor/lang-python, MIT). Depending on that package instead would run its postinstall, which npm
+// 11.21+ blocks and warns about; on every platform it has a prebuild for, that script does nothing.
+// An installed @ast-grep/lang-python still takes precedence.
+const OS: Record<string, string> = { darwin: "macOS", linux: "Linux", win32: "Windows" };
+const ARCH: Record<string, string> = { x64: "X64", arm64: "ARM64" };
+
+export function vendoredPython(platform: string = process.platform, arch: string = process.arch): unknown | undefined {
+  const os = OS[platform];
+  const cpu = ARCH[arch];
+  if (!os || !cpu) return undefined;
+  const libraryPath = join(dirname(fileURLToPath(import.meta.url)), "..", "vendor", "lang-python", "prebuilds", `prebuild-${os}-${cpu}`, "parser.so");
+  if (!existsSync(libraryPath)) return undefined;
+  return { libraryPath, extensions: ["py"], languageSymbol: "tree_sitter_python", expandoChar: "µ" };
+}
+
 /** Only the first registerDynamicLanguage call takes effect, so every installed grammar goes in it. */
 function dynamicLanguages(): Set<string> {
   if (registered) return registered;
@@ -50,7 +68,11 @@ function dynamicLanguages(): Set<string> {
       const mod = require(`@ast-grep/lang-${name}`) as { default?: unknown };
       langs[name] = mod.default ?? mod;
     } catch {
-      // Not installed: that language is unavailable.
+      // Not installed: that language is unavailable, except the vendored Python grammar.
+      if (name === "python") {
+        const vendored = vendoredPython();
+        if (vendored) langs[name] = vendored;
+      }
     }
   }
   if (Object.keys(langs).length) load().registerDynamicLanguage(langs);
