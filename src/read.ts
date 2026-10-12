@@ -1,6 +1,6 @@
 // `read` with LINE#HASH anchors on every text line (same format as pi-hashline-edit). Images and
 // other non-text files go to pi's built-in read.
-import { readFile, stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { extname, resolve } from "node:path";
 import {
   createReadToolDefinition,
@@ -66,7 +66,8 @@ export function registerReadTool(pi: ExtensionAPI): void {
         return createReadToolDefinition(ctx.cwd).execute(id, params, signal, onUpdate, ctx);
       }
       const { out, view } = renderAnchored(buf.toString("utf8"), params.offset, params.limit);
-      if (view !== undefined) noteShown(abs, view);
+      // The engine keys files by their symlink-resolved path, so the view is recorded under it too.
+      if (view !== undefined) noteShown(await realpath(abs).catch(() => abs), view);
       return { content: [{ type: "text", text: out }], details: undefined };
     },
   });
