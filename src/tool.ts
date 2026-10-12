@@ -11,7 +11,7 @@ import {
 import { Container, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { commit, ConflictError, drift, serially, type FileChange } from "./commit.ts";
-import { Planner, toRaw, type EditRequest, type Failure, type PlanFs } from "./engine.ts";
+import { Planner, toRaw, type EditRequest, type Failure, type FileState, type PlanFs } from "./engine.ts";
 import { renderReport, type FileReport } from "./feedback.ts";
 import { anchorOf } from "./hash.ts";
 import { noteShown, shownHash } from "./shown.ts";
@@ -46,7 +46,8 @@ export const editSchema = Type.Object(
   { additionalProperties: false },
 );
 
-type Params = EditRequest & { allowSyntaxErrors?: boolean };
+export type EditParams = EditRequest & { allowSyntaxErrors?: boolean };
+type Params = EditParams;
 
 export type EditDetails = {
   files: { path: string; status: FileReport["status"]; diff: string }[];
@@ -88,7 +89,7 @@ function isBinary(buf: Buffer): boolean {
   return buf.subarray(0, 8192).includes(0);
 }
 
-async function readText(abs: string): Promise<string | null> {
+export async function readText(abs: string): Promise<string | null> {
   let buf: Buffer;
   try {
     buf = await readFile(abs);
@@ -106,7 +107,7 @@ async function readText(abs: string): Promise<string | null> {
 }
 
 /** Symlinks resolved; for a path that does not exist yet, its directory is resolved instead. */
-async function canonical(abs: string): Promise<string> {
+export async function canonical(abs: string): Promise<string> {
   try {
     return await realpath(abs);
   } catch {
@@ -118,11 +119,11 @@ async function canonical(abs: string): Promise<string> {
   }
 }
 
-async function isSymlink(abs: string): Promise<boolean> {
+export async function isSymlink(abs: string): Promise<boolean> {
   return (await lstat(abs).catch(() => undefined))?.isSymbolicLink() ?? false;
 }
 
-async function listFiles(cwd: string): Promise<string[]> {
+export async function listFiles(cwd: string): Promise<string[]> {
   try {
     const { stdout } = await run("git", ["ls-files", "-co", "--exclude-standard", "-z"], { cwd, maxBuffer: 256 << 20 });
     return stdout.split("\0").filter(Boolean);
@@ -136,7 +137,7 @@ async function listFiles(cwd: string): Promise<string[]> {
   }
 }
 
-function syntaxSummary(reports: FileReport[]): { summary: string; warning?: string; broken?: boolean } {
+export function syntaxSummary(reports: FileReport[]): { summary: string; warning?: string; broken?: boolean } {
   let checked = 0;
   const broken: string[] = [];
   for (const r of reports) {
@@ -166,7 +167,72 @@ function formatFailures(failures: Failure[], total: number): string {
   return lines.join("\n");
 }
 
-const ATTEMPTS = 3;
+export const ATTEMPTS = 3;
+
+/** A planned edit call that passed every check, not yet written anywhere. */
+export type Planned = {
+  planner: Planner;
+  editCount: number;
+  /** States of the files the call changes. */
+  changed: FileState[];
+  changes: FileChange[];
+  reports: FileReport[];
+  details: EditDetails;
+  noteText: string;
+  syntax: ReturnType<typeof syntaxSummary>;
+};
+
+const concurrentNote = (rebased: Set<string>) => (rebased.size ? `\n\n(re-planned after concurrent changes to: ${[...rebased].join(", ")})` : "");
+
+/**
+ * Plans the edits against `fs` and runs every check a write would (step failures, new parse errors);
+ * throws the model-facing error if any fails. Writes nothing.
+ */
+export async function planEdits(cwd: string, params: Params, fs: PlanFs, rebased: Set<string> = new Set()): Promise<Planned> {
+  const planner = new Planner(cwd, fs);
+  const plan = await planner.run(params);
+  const concurrent = concurrentNote(rebased);
+  if (plan.failures.length) throw new Error(formatFailures(plan.failures, plan.editCount) + concurrent);
+
+  const changed = [...plan.files.values()].filter((st) => st.cur !== st.orig || (st.orig === null && st.cur !== null));
+  const changes: FileChange[] = changed.map((st) => ({ abs: st.abs, before: st.raw, after: toRaw(st, st.cur) }));
+  const reports: FileReport[] = changed.map((st) => ({
+    path: planner.rel(st.abs),
+    status: st.cur === null ? "deleted" : st.orig === null ? "created" : "modified",
+    before: st.orig,
+    after: st.cur,
+  }));
+  const details: EditDetails = {
+    written: false,
+    files: reports.map((r) => ({ path: r.path, status: r.status, diff: generateDiffString(r.before ?? "", r.after ?? "").diff })),
+  };
+  const noteText = plan.notes.map((n) => `step ${n.edit}: ${n.text}`).join("\n");
+  const syntax = changes.length ? syntaxSummary(reports) : { summary: "" };
+  if (syntax.broken && !params.allowSyntaxErrors) {
+    throw new Error(
+      `Nothing was written: the edit introduces parse errors. Fix them in the retry, or set allowSyntaxErrors if the parser is wrong.\n${syntax.warning}${concurrent}`,
+    );
+  }
+  return { planner, editCount: plan.editCount, changed, changes, reports, details, noteText, syntax };
+}
+
+/** The result of a call whose edits leave every file as it was. */
+export function noChangesResult(p: Planned, rebased: Set<string> = new Set()) {
+  return {
+    content: [{ type: "text" as const, text: ["No changes: the edits leave every file as it was.", p.noteText].filter(Boolean).join("\n") + concurrentNote(rebased) }],
+    details: p.details,
+  };
+}
+
+/** The model-facing result text; `state` is what happened to the files (re-read from disk, or drafted). */
+export function resultText(p: Pick<Planned, "editCount" | "changes" | "syntax" | "noteText" | "reports">, state: string, rebased: Set<string> = new Set()): string {
+  const out = [`Applied ${p.editCount} step(s) to ${p.changes.length} file(s); ${state}; ${p.syntax.summary}.`];
+  if (rebased.size) out.push(`re-planned on top of concurrent changes to: ${[...rebased].join(", ")}`);
+  if (p.syntax.warning) out.push(p.syntax.warning);
+  if (p.noteText) out.push(p.noteText);
+  out.push(renderReport(p.reports));
+  return out.join("\n\n");
+}
 
 /**
  * Plans the edits, then commits them only if no file changed since it was read. On a conflict the
@@ -176,33 +242,9 @@ const ATTEMPTS = 3;
 export async function applyEdits(cwd: string, params: Params, fs: PlanFs, signal?: AbortSignal) {
   const rebased = new Set<string>();
   for (let attempt = 1; ; attempt++) {
-    const planner = new Planner(cwd, fs);
-    const plan = await planner.run(params);
-    const concurrent = rebased.size ? `\n\n(re-planned after concurrent changes to: ${[...rebased].join(", ")})` : "";
-    if (plan.failures.length) throw new Error(formatFailures(plan.failures, plan.editCount) + concurrent);
-
-    const changed = [...plan.files.values()].filter((st) => st.cur !== st.orig || (st.orig === null && st.cur !== null));
-    const changes: FileChange[] = changed.map((st) => ({ abs: st.abs, before: st.raw, after: toRaw(st, st.cur) }));
-    const reports: FileReport[] = changed.map((st) => ({
-      path: planner.rel(st.abs),
-      status: st.cur === null ? "deleted" : st.orig === null ? "created" : "modified",
-      before: st.orig,
-      after: st.cur,
-    }));
-    const details: EditDetails = {
-      written: false,
-      files: reports.map((r) => ({ path: r.path, status: r.status, diff: generateDiffString(r.before ?? "", r.after ?? "").diff })),
-    };
-    const noteText = plan.notes.map((n) => `step ${n.edit}: ${n.text}`).join("\n");
-    if (changes.length === 0) {
-      return { content: [{ type: "text" as const, text: ["No changes: the edits leave every file as it was.", noteText].filter(Boolean).join("\n") + concurrent }], details };
-    }
-    const syntax = syntaxSummary(reports);
-    if (syntax.broken && !params.allowSyntaxErrors) {
-      throw new Error(
-        `Nothing was written: the edit introduces parse errors. Fix them in the retry, or set allowSyntaxErrors if the parser is wrong.\n${syntax.warning}${concurrent}`,
-      );
-    }
+    const p = await planEdits(cwd, params, fs, rebased);
+    const { planner, changes, changed, details } = p;
+    if (changes.length === 0) return noChangesResult(p, rebased);
 
     signal?.throwIfAborted();
     let drifted: Awaited<ReturnType<typeof drift>>;
@@ -224,12 +266,7 @@ export async function applyEdits(cwd: string, params: Params, fs: PlanFs, signal
     const disk = drifted.length
       ? `WARNING: on re-read these differ from what was written (another process changed them): ${drifted.map((d) => planner.rel(d.abs)).join(", ")}`
       : "re-read from disk: identical";
-    const out = [`Applied ${plan.editCount} step(s) to ${changes.length} file(s); ${disk}; ${syntax.summary}.`];
-    if (rebased.size) out.push(`re-planned on top of concurrent changes to: ${[...rebased].join(", ")}`);
-    if (syntax.warning) out.push(syntax.warning);
-    if (noteText) out.push(noteText);
-    out.push(renderReport(reports));
-    return { content: [{ type: "text" as const, text: out.join("\n\n") }], details };
+    return { content: [{ type: "text" as const, text: resultText(p, disk, rebased) }], details };
   }
 }
 

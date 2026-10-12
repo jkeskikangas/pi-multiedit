@@ -25,6 +25,31 @@ const schema = Type.Object(
   { additionalProperties: false },
 );
 
+/**
+ * The text `read` shows for a file's content: `N#HH:` lines from `offset`, capped and paged. `view` is
+ * the whole file as shown (BOM dropped, LF endings), to record as seen; undefined for an empty file.
+ */
+export function renderAnchored(raw: string, offset?: number, limit?: number): { out: string; view?: string } {
+  let text = raw;
+  if (text.startsWith("\uFEFF")) text = text.slice(1);
+  const lines = splitLines(text.replace(/\r\n/g, "\n"));
+  if (lines.length === 0) return { out: "(empty file; create content with edit files[].write)" };
+  const first = offset ?? 1;
+  if (first > lines.length) throw new Error(`offset ${first} is past the end (${lines.length} lines)`);
+  const last = Math.min(lines.length, first - 1 + (limit ?? DEFAULT_MAX_LINES), first - 1 + DEFAULT_MAX_LINES);
+  const picked: string[] = [];
+  let bytes = 0;
+  for (let n = first; n <= last; n++) {
+    bytes += Buffer.byteLength(lines[n - 1]) + 10;
+    if (bytes > DEFAULT_MAX_BYTES && picked.length > 0) break;
+    picked.push(lines[n - 1]);
+  }
+  let out = formatAnchored(picked, first);
+  const end = first + picked.length - 1;
+  if (end < lines.length) out += `\n\n[Lines ${first}-${end} of ${lines.length}. Continue with offset=${end + 1}.]`;
+  return { out, view: lines.join("\n") };
+}
+
 export function registerReadTool(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "read",
@@ -40,24 +65,8 @@ export function registerReadTool(pi: ExtensionAPI): void {
       if (IMAGE.has(extname(abs).toLowerCase()) || buf.subarray(0, 8192).includes(0)) {
         return createReadToolDefinition(ctx.cwd).execute(id, params, signal, onUpdate, ctx);
       }
-      let text = buf.toString("utf8");
-      if (text.startsWith("\uFEFF")) text = text.slice(1);
-      const lines = splitLines(text.replace(/\r\n/g, "\n"));
-      if (lines.length === 0) return { content: [{ type: "text", text: "(empty file; create content with edit files[].write)" }], details: undefined };
-      const first = params.offset ?? 1;
-      if (first > lines.length) throw new Error(`offset ${first} is past the end (${lines.length} lines)`);
-      const last = Math.min(lines.length, first - 1 + (params.limit ?? DEFAULT_MAX_LINES), first - 1 + DEFAULT_MAX_LINES);
-      const picked: string[] = [];
-      let bytes = 0;
-      for (let n = first; n <= last; n++) {
-        bytes += Buffer.byteLength(lines[n - 1]) + 10;
-        if (bytes > DEFAULT_MAX_BYTES && picked.length > 0) break;
-        picked.push(lines[n - 1]);
-      }
-      let out = formatAnchored(picked, first);
-      noteShown(abs, lines.join("\n"));
-      const end = first + picked.length - 1;
-      if (end < lines.length) out += `\n\n[Lines ${first}-${end} of ${lines.length}. Continue with offset=${end + 1}.]`;
+      const { out, view } = renderAnchored(buf.toString("utf8"), params.offset, params.limit);
+      if (view !== undefined) noteShown(abs, view);
       return { content: [{ type: "text", text: out }], details: undefined };
     },
   });
