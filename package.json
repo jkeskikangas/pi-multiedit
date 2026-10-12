@@ -16,7 +16,8 @@
     ]
   },
   "scripts": {
-    "test": "node --experimental-strip-types --test test/*.test.ts"
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "typecheck": "tsc -p ."
   },
   "dependencies": {
     "@ast-grep/lang-python": "^0.0.6",
