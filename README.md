@@ -48,7 +48,7 @@ happened. pi-multiedit is built so that none of this is needed.
 
 | Tool | What it does |
 |---|---|
-| `read{path, offset?, limit?}` | Returns text with an anchor on every line (`12#KT:  return total`). The hashes are compatible with pi-hashline-edit. Images and other non-text files use pi's built-in `read`. |
+| `read{path, offset?, limit?}` or `read{files: [{path, offset?, limit?}, ...]}` | Reads one file or up to 20 in request order, with an anchor on every text line (`12#KT:  return total`). The hashes are compatible with pi-hashline-edit. Images and other non-text files use pi's built-in `read`. |
 | `edit{edits, allowSyntaxErrors?}` | Applies every edit in order, all or nothing. |
 
 Each edit has a **scope**, at most one **selector**, and optionally an **action** and a **count**:
@@ -78,6 +78,35 @@ site:
 ```
 
 Moving a file is not an edit; use `git mv`.
+
+## Reading several files
+
+Use `files` instead of `path` to inspect several known files in one call. Each entry has its own
+optional `offset` and `limit`; do not put paging options at the top level with `files`.
+
+```json
+{"files": [
+  {"path": "src/accounts.ts"},
+  {"path": "src/accounts-api.ts", "offset": 20, "limit": 40},
+  {"path": "test/layers.json"}
+]}
+```
+
+Each result starts with a file label, followed by its usual anchored lines (or image attachment).
+Anchors and bare line numbers work in subsequent edits just as with single-file reads. Only lines
+actually returned by a batch are recorded as seen. Repeated paths are allowed, for example to read
+two separate regions of one file.
+
+A batch accepts 1–20 entries and shares one text-output budget: 2,000 lines or 50 KiB, including
+labels and notices. Images remain attachments outside that text budget. When the budget runs out,
+the result identifies the entry by its zero-based `files` index, gives the next line offset when
+available, and asks you to retry the remaining files. A line that cannot fit is not cut in half;
+read that file separately for more space. Unreturned files are not recorded as seen.
+
+A missing file, directory or invalid offset produces a labeled per-file error without hiding the
+other results. Any per-file error marks the tool result as an error, even when other reads succeed.
+Single-file errors still fail normally. A batch is not a filesystem snapshot: files are read in
+request order, and the usual stale-anchor checks protect later edits.
 
 ## What comes back
 
